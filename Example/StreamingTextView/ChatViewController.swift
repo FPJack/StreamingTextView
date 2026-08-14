@@ -165,23 +165,26 @@ class ChatViewController: UIViewController, StreamingTextViewDelegate {
         let markdown = readmeMarkdown()
         let maxImageWidth = min(UIScreen.main.bounds.width - 32.0, 300.0) - 24.0
 
-        // 1) 解析 Markdown 得到未处理的富文本。
-        guard let parsed = DownBridge.attributedString(fromMarkdown: markdown,
-                                                         fontSize: 16.0,
-                                                         textColor: UIColor(white: 0.15, alpha: 1.0)),
-              parsed.length > 0 else {
+        // 1) 解析 Markdown 并在方法内部直接完成图片下载（下载完成后回调刷新对应区域）。
+        streamGeneration += 1
+        let generation = streamGeneration
+        let options = MarkdownRenderOptions()
+        options.fontSize = 16.0
+        options.textColor = UIColor(white: 0.15, alpha: 1.0)
+        options.maxImageWidth = maxImageWidth
+        options.onImageLoaded = { [weak self] attach in
+            guard let self = self,
+                  generation == self.streamGeneration else {
+                return
+            }
+            self.refreshImage(at: attach.range)
+        }
+        guard let rich = DownBridge.attributedString(fromMarkdown: markdown, options: options),
+              rich.length > 0 else {
             typingLabel.text = "解析失败"
             isResponding = false
             navigationItem.rightBarButtonItem?.isEnabled = true
             return
-        }
-
-        // 2) 处理图片：替换为会自下载的附件，下载完成后回调刷新对应区域。
-        streamGeneration += 1
-        let generation = streamGeneration
-        let rich = DownBridge.processImages(in: parsed, maxImageWidth: maxImageWidth) { [weak self] range in
-            guard let self = self, generation == self.streamGeneration else { return }
-            self.refreshImage(at: range)
         }
 
         // 立即开始流式打印（图片在附件内部异步下载，完成后回调刷新）。

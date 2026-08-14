@@ -139,16 +139,35 @@ class TableStreamViewController: UIViewController, UITableViewDataSource, UITabl
             .underlineStyle: NSUnderlineStyle.single.rawValue]))
         return rich
     }
+    /// 读取 bundle 里的 Markdown 资源。
+    private func readmeMarkdown() -> String {
+        if let path = Bundle.main.path(forResource: "Test", ofType: "md"),
+           let content = try? String(contentsOfFile: path, encoding: .utf8), !content.isEmpty {
+            return content
+        }
+        return "# Test.md 未找到"
+    }
+    private func markDown() -> NSAttributedString {
+        let markdown = readmeMarkdown()
+        let maxImageWidth = min(UIScreen.main.bounds.width - 32.0, 300.0) - 24.0
+        let options = MarkdownRenderOptions()
+        options.fontSize = 16.0
+        options.textColor = UIColor(white: 0.15, alpha: 1.0)
+        options.maxImageWidth = maxImageWidth
+        options.onImageLoaded = { [weak self] attach in
 
+        }
+        return DownBridge.attributedString(fromMarkdown: markdown, options: options)!
+
+    }
     private func buildScriptedMessages() -> [NSAttributedString] {
         [
             plainAttributed("你好，我是流式助手 👋，下面用 tableView 逐条演示打字效果。"),
             sampleRichText(),
-            plainAttributed("这是一条较长的消息：ZLStreamingTextView 使用 CADisplayLink 逐帧打印文字，"
-                + "随着内容变多，所在 cell 的高度会自动增长，tableView 会实时刷新行高，"
-                + "并在打印过程中自动向上滚动，始终把最新文字保持在可视区域底部。"),
+           
             plainAttributed("你可以在打印过程中手动向上滑动查看历史消息，此时会暂停自动跟随；"
                 + "当你重新滑动回底部附近，自动跟随会恢复。"),
+            markDown(),
             plainAttributed("再来一条更长的内容，确保总高度超过一屏：\n"
                 + "1. 支持纯文本与富文本；\n2. 支持从指定偏移开始；\n3. 支持模拟网络分块追加；\n"
                 + "4. 支持最大/最小宽高；\n5. 支持内容尺寸变化回调，从而驱动 cell 高度与列表滚动。\n"

@@ -27,6 +27,8 @@ public class ImageTextAttachment: NSTextAttachment {
 
     /// 图片下载完成（成功）后回调，外部据此刷新对应区域 / 高度。
     public var onImageLoaded: ((ImageTextAttachment) -> Void)?
+    
+    public var range: NSRange = NSRange(location: 0, length: 0)
 
     /// 开始异步下载图片（会先设置占位图，完成后替换并回调）。
     public func loadImage() {
@@ -119,6 +121,39 @@ public class ImageStyler: DownStyler {
     }
 }
 
+/// Markdown 渲染配置：除 markdown 字符串外的所有参数都收拢到这个对象里。
+@objcMembers
+public class MarkdownRenderOptions: NSObject {
+
+    /// 正文基准字号。
+    public var fontSize: CGFloat = 16.0
+
+    /// 正文文字颜色。
+    public var textColor: UIColor = UIColor(white: 0.15, alpha: 1.0)
+
+    /// 图片显示的最大宽度（按比例缩放）。<=0 表示不限制。
+    public var maxImageWidth: CGFloat = 0
+
+    /// 单张图片下载完成后的回调，参数为其在富文本中的 range。
+    public var onImageLoaded: ((ImageTextAttachment) -> Void)?
+
+    public override init() {
+        super.init()
+    }
+
+    /// 便捷初始化。
+    public convenience init(fontSize: CGFloat,
+                            textColor: UIColor,
+                            maxImageWidth: CGFloat,
+                            onImageLoaded: ((ImageTextAttachment) -> Void)? = nil) {
+        self.init()
+        self.fontSize = fontSize
+        self.textColor = textColor
+        self.maxImageWidth = maxImageWidth
+        self.onImageLoaded = onImageLoaded
+    }
+}
+
 @objcMembers
 public class DownBridge: NSObject {
 
@@ -142,10 +177,15 @@ public class DownBridge: NSObject {
         return textView
     }
 
-    /// Parse Markdown into an attributed string with a base font size and text color.
+    /// 解析 Markdown 为富文本，并在方法内部直接完成图片下载（占位 → 异步下载 → 回填）。
+    /// 返回的富文本中，图片先显示占位，下载完成后自动更新，并通过 `options.onImageLoaded(range)` 回调刷新对应区域。
+    /// - Parameters:
+    ///   - markdown: Markdown 源码。
+    ///   - options: 渲染配置（字号、颜色、图片最大宽度、图片下载回调等）。
     public static func attributedString(fromMarkdown markdown: String,
-                                        fontSize: CGFloat,
-                                        textColor: UIColor) -> NSAttributedString? {
+                                        options: MarkdownRenderOptions) -> NSAttributedString? {
+        let fontSize = options.fontSize
+        let textColor = options.textColor
         var fonts = StaticFontCollection()
         fonts.body = UIFont.systemFont(ofSize: fontSize)
         fonts.heading1 = UIFont.boldSystemFont(ofSize: fontSize + 9)
@@ -201,8 +241,10 @@ public class DownBridge: NSObject {
 
         do {
             // 使用自定义 styler，让图片变成真正的 NSTextAttachment（并携带 URL）。
-            return try Down(markdownString: markdown)
+            let parsed = try Down(markdownString: markdown)
                 .toAttributedString(.normalize, styler: ImageStyler(configuration: configuration))
+            // 直接在这里完成图片下载：把占位附件替换为会自下载的 `ImageTextAttachment` 并触发下载。
+            return processImages(in: parsed, maxImageWidth: options.maxImageWidth, onImageLoaded: options.onImageLoaded)
         } catch {
             print("Error converting markdown: \(error)")
             return nil
@@ -218,7 +260,7 @@ public class DownBridge: NSObject {
     ///   - onImageLoaded: 单张图片下载完成后的回调，参数为其在富文本中的 range。
     public static func processImages(in attributedText: NSAttributedString,
                                      maxImageWidth: CGFloat,
-                                     onImageLoaded: ((NSRange) -> Void)?) -> NSAttributedString {
+                                     onImageLoaded: ((ImageTextAttachment) -> Void)?) -> NSAttributedString {
         let rich = NSMutableAttributedString(attributedString: attributedText)
         let urlKey = NSAttributedString.Key(imageURLAttributeName)
         let fullRange = NSRange(location: 0, length: rich.length)
@@ -232,8 +274,9 @@ public class DownBridge: NSObject {
             let attachment = ImageTextAttachment()
             attachment.imageURLString = urlStr
             attachment.maxImageWidth = maxImageWidth
-            attachment.onImageLoaded = { _ in
-                onImageLoaded?(range)
+            attachment.range = range
+            attachment.onImageLoaded = { attach in
+                onImageLoaded?(attach)
             }
             rich.addAttribute(.attachment, value: attachment, range: range)
             attachment.loadImage()
