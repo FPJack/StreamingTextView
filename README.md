@@ -13,12 +13,27 @@ To run the example project, clone the repo, and run `pod install` from the Examp
 
 ## Installation
 
+### CocoaPods
+
 StreamingTextView is available through [CocoaPods](https://cocoapods.org). To install
 it, simply add the following line to your Podfile:
 
 ```ruby
 pod 'StreamingTextView'
 ```
+
+### Swift Package Manager
+
+Add the package to your `Package.swift` dependencies:
+
+```swift
+dependencies: [
+    .package(url: "https://github.com/fanpeng/StreamingTextView.git", from: "0.1.0")
+]
+```
+
+Or in Xcode: **File → Add Package Dependencies…**, and enter the repo URL
+`https://github.com/fanpeng/StreamingTextView.git`.
 
 ## Author
 

@@ -1,0 +1,37 @@
+PODS:
+  - Down (0.11.0)
+  - FBSnapshotTestCase (2.1.4):
+    - FBSnapshotTestCase/SwiftSupport (= 2.1.4)
+  - FBSnapshotTestCase/Core (2.1.4)
+  - FBSnapshotTestCase/SwiftSupport (2.1.4):
+    - FBSnapshotTestCase/Core
+  - SDWebImage (5.21.7):
+    - SDWebImage/Core (= 5.21.7)
+  - SDWebImage/Core (5.21.7)
+  - StreamingTextView (0.1.0)
+
+DEPENDENCIES:
+  - Down
+  - FBSnapshotTestCase (~> 2.1.4)
+  - SDWebImage
+  - StreamingTextView (from `../`)
+
+SPEC REPOS:
+  trunk:
+    - Down
+    - FBSnapshotTestCase
+    - SDWebImage
+
+EXTERNAL SOURCES:
+  StreamingTextView:
+    :path: "../"
+
+SPEC CHECKSUMS:
+  Down: b6ba1bc985c9d2f4e15e3b293d2207766fa12612
+  FBSnapshotTestCase: 094f9f314decbabe373b87cc339bea235a63e07a
+  SDWebImage: e9fc87c1aab89a8ab1bbd74eba378c6f53be8abf
+  StreamingTextView: 62d81158cf226c32158ece69058ce2f283bec274
+
+PODFILE CHECKSUM: 53dc7232858d09c80cd30745c5e991aa78cfc85f
+
+COCOAPODS: 1.16.2

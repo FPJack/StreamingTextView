@@ -24,12 +24,12 @@ TODO: Add long description of the pod here.
   s.homepage         = 'https://github.com/fanpeng/StreamingTextView'
   # s.screenshots     = 'www.example.com/screenshots_1', 'www.example.com/screenshots_2'
   s.license          = { :type => 'MIT', :file => 'LICENSE' }
-  s.author           = { 'fanpeng' => 'peng.fan@ukelink.com' }
-  s.source           = { :git => 'https://github.com/fanpeng/StreamingTextView.git', :tag => s.version.to_s }
+  s.author           = { 'fanpeng' => '2551412939@qq.com' }
+  s.source           = { :git => 'https://github.com/FPJack/StreamingTextView.git', :tag => s.version.to_s }
   # s.social_media_url = 'https://twitter.com/<TWITTER_USERNAME>'
 
   s.ios.deployment_target = '10.0'
-
+  s.swift_versions = ['5.0']
   s.source_files = 'StreamingTextView/Classes/**/*'
   
   # s.resource_bundles = {

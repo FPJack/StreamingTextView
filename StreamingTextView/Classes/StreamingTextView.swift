@@ -1,0 +1,394 @@
+//
+//  StreamingTextView.swift
+//  StreamingTextView
+//
+//  一个封装了 UITextView 的视图，可逐帧打印文字（打字机 / 流式效果）。
+//  同时支持纯文本（String）和富文本（NSAttributedString）。
+//  使用 @objc / @objcMembers 标注以支持 Objective-C 调用。
+//
+
+import UIKit
+
+/// CADisplayLink 会强引用它的 target，若直接用 self 作为 target 会造成引用环、
+/// 甚至在视图/复用 cell 被销毁后回调到半析构对象导致崩溃。用弱引用代理打破环。
+private final class DisplayLinkProxy: NSObject {
+    weak var target: StreamingTextView?
+    init(target: StreamingTextView) { self.target = target }
+    @objc func onDisplayLink(_ link: CADisplayLink) {
+        target?.zl_handleDisplayLink(link)
+    }
+}
+
+/// 进度 / 完成 / 尺寸变化回调代理。
+@objc public protocol StreamingTextViewDelegate: NSObjectProtocol {
+    /// 每当可见文字长度变化（即每帧）时回调。
+    @objc optional func streamingTextView(_ textView: StreamingTextView,
+                                          didUpdateVisibleLength visibleLength: Int,
+                                          totalLength: Int)
+    /// 当所有缓冲文字都显示完毕、流式停止时回调一次。
+    @objc optional func streamingTextViewDidFinish(_ textView: StreamingTextView)
+    /// 当渲染文字的内容尺寸（宽和/或高）发生变化时回调。
+    @objc optional func streamingTextView(_ textView: StreamingTextView,
+                                          didChangeContentSize contentSize: CGSize)
+}
+
+@objcMembers
+public class StreamingTextView: UIView {
+
+    // MARK: - 公开属性
+
+    /// 底层的文本视图。你可以直接配置它（字体、颜色、内边距……）。
+    public private(set) var textView: UITextView!
+
+    /// 进度 / 完成回调的代理。
+    public weak var delegate: StreamingTextViewDelegate?
+
+    /// 每一帧（display link）显示的字符数。默认为 1。
+    public var charactersPerFrame: Int = 1
+
+    /// 每隔 N 个屏幕帧显示一帧文字。1 = 每帧都显示（最快）。默认为 1。
+    public var frameInterval: Int = 1
+
+    /// 纯文本流式时若未指定属性所使用的默认文字属性。
+    public var defaultTextAttributes: [NSAttributedString.Key: Any]? = [
+        .font: UIFont.systemFont(ofSize: 16.0),
+        .foregroundColor: UIColor.black
+    ]
+
+    /// 是否启用逐帧打字机效果。设为 `false` 时，任何 start.../append... 调用都会立即完整显示。默认 `true`。
+    public var isStreamingEnabled: Bool = true {
+        didSet {
+            guard oldValue != isStreamingEnabled else { return }
+            // 若在文字仍未显示完时关闭流式，则立即显示剩余内容。
+            if !isStreamingEnabled && visibleLength < bufferedText.length {
+                finishImmediately()
+            }
+        }
+    }
+
+    /// 排版 / 换行所使用的最大宽度。`0` 表示使用视图当前宽度。默认 `0`。
+    public var maxTextWidth: CGFloat = 0 {
+        didSet { if oldValue != maxTextWidth { notifyContentSizeChangeIfNeeded() } }
+    }
+
+    /// 最大高度。上报的内容尺寸高度会被限制到此值（超出部分由文本视图滚动显示）。`0` 表示不限制。默认 `0`。
+    public var maxTextHeight: CGFloat = 0 {
+        didSet { if oldValue != maxTextHeight { notifyContentSizeChangeIfNeeded() } }
+    }
+
+    /// 最小宽度。上报的内容尺寸宽度不会小于此值。`0` 表示不限制。默认 `0`。
+    public var minTextWidth: CGFloat = 0 {
+        didSet { if oldValue != minTextWidth { notifyContentSizeChangeIfNeeded() } }
+    }
+
+    /// 最小高度。上报的内容尺寸高度不会小于此值。`0` 表示不限制。默认 `0`。
+    public var minTextHeight: CGFloat = 0 {
+        didSet { if oldValue != minTextHeight { notifyContentSizeChangeIfNeeded() } }
+    }
+
+    /// 打印过程中（及之后）底层文本视图是否可以滚动。默认 `true`。
+    public var isScrollEnabled: Bool {
+        get { textView.isScrollEnabled }
+        set { textView.isScrollEnabled = newValue }
+    }
+
+    /// 正在逐帧显示文字时为 true。
+    public private(set) var isStreaming: Bool = false
+
+    /// 当前已显示的字符数。
+    public private(set) var visibleLength: Int = 0
+
+    /// 缓冲区中的总字符数（已显示 + 待显示）。
+    public var totalLength: Int { bufferedText.length }
+
+    /// 进度回调（代理的替代方案）。
+    public var onProgress: ((_ visibleLength: Int, _ totalLength: Int) -> Void)?
+
+    /// 完成回调（代理的替代方案）。
+    public var onComplete: (() -> Void)?
+
+    /// 流式过程中，当渲染文字的内容尺寸（宽 / 高）变化时回调。
+    public var onContentSizeChange: ((_ contentSize: CGSize) -> Void)?
+
+    // MARK: - 私有状态
+
+    /// 完整的缓冲内容（最终要显示的全部文字）。
+    private var bufferedText = NSMutableAttributedString()
+    private var displayLink: CADisplayLink?
+    /// 强持有弱引用代理，保证它在流式期间不被释放（否则 displayLink 目标为空，不会走帧回调）。
+    private var displayLinkProxy: DisplayLinkProxy?
+    private var frameCounter: Int = 0
+    /// 上一次上报的内容尺寸，用于检测宽 / 高变化。
+    private var lastContentSize: CGSize = .zero
+
+    // MARK: - 初始化
+
+    /// 使用指定 frame 与外部传入的自定义 UITextView 进行初始化。
+    /// 传入的 textView 会被强制设为不可编辑，其余配置保持不变。
+    public init(frame: CGRect, textView: UITextView?) {
+        super.init(frame: frame)
+        commonInit(with: textView)
+    }
+
+    /// 使用外部传入的自定义 UITextView 进行初始化。
+    public convenience init(textView: UITextView?) {
+        self.init(frame: .zero, textView: textView)
+    }
+
+    public override init(frame: CGRect) {
+        super.init(frame: frame)
+        commonInit(with: nil)
+    }
+
+    public required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        commonInit(with: nil)
+    }
+
+    private func commonInit(with textView: UITextView?) {
+        if let tv = textView {
+            // 采用外部传入的自定义文本视图，尽量保留其原有配置。
+            tv.frame = bounds
+            tv.isEditable = false // 流式展示视图不可编辑
+            self.textView = tv
+        } else {
+            let tv = UITextView(frame: bounds)
+            tv.isEditable = false
+            tv.isScrollEnabled = true
+            tv.backgroundColor = .clear
+            tv.textContainerInset = UIEdgeInsets(top: 8, left: 8, bottom: 8, right: 8)
+            self.textView = tv
+        }
+        self.textView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        addSubview(self.textView)
+    }
+
+    deinit {
+        stopDisplayLink()
+    }
+
+    // MARK: - 纯文本
+
+    /// 重置缓冲区，并使用 `defaultTextAttributes` 开始流式显示给定的纯文本。
+    public func startStreamingText(_ text: String) {
+        startStreamingText(text, attributes: defaultTextAttributes)
+    }
+
+    /// 重置缓冲区，并使用指定属性开始流式显示给定的纯文本。
+    public func startStreamingText(_ text: String, attributes: [NSAttributedString.Key: Any]?) {
+        let attrs = attributes ?? defaultTextAttributes ?? [:]
+        let attributed = NSAttributedString(string: text, attributes: attrs)
+        startStreamingAttributedText(attributed)
+    }
+
+    // MARK: - 富文本
+
+    /// 重置缓冲区，并开始流式显示给定的富文本。
+    public func startStreamingAttributedText(_ attributedText: NSAttributedString) {
+        resetBuffer()
+        if attributedText.length > 0 {
+            bufferedText.append(attributedText)
+        }
+        startDisplayLinkIfNeeded()
+    }
+
+    // MARK: - 从指定偏移开始
+
+    /// 将缓冲区重置为给定纯文本，立即显示前 `startLength` 个字符，然后从该处开始流式显示剩余内容。
+    public func startStreamingText(_ text: String, fromLength startLength: Int) {
+        let attributed = NSAttributedString(string: text, attributes: defaultTextAttributes ?? [:])
+        startStreamingAttributedText(attributed, fromLength: startLength)
+    }
+
+    /// 将缓冲区重置为给定富文本，立即显示前 `startLength` 个字符，然后从该处开始流式显示剩余内容。
+    public func startStreamingAttributedText(_ attributedText: NSAttributedString, fromLength startLength: Int) {
+        resetBuffer()
+        if attributedText.length > 0 {
+            bufferedText.append(attributedText)
+        }
+        // 立即显示前缀，然后从该处开始流式显示剩余内容。
+        visibleLength = min(startLength, bufferedText.length)
+        applyVisibleText()
+        startDisplayLinkIfNeeded()
+    }
+
+    // MARK: - 增量追加（例如网络流式分块）
+
+    /// 向缓冲区追加纯文本；流式会自动继续 / 开始。
+    public func appendText(_ text: String) {
+        guard !text.isEmpty else { return }
+        let attributed = NSAttributedString(string: text, attributes: defaultTextAttributes ?? [:])
+        appendAttributedText(attributed)
+    }
+
+    /// 向缓冲区追加富文本；流式会自动继续 / 开始。
+    public func appendAttributedText(_ attributedText: NSAttributedString) {
+        guard attributedText.length > 0 else { return }
+        bufferedText.append(attributedText)
+        startDisplayLinkIfNeeded()
+    }
+
+    // MARK: - 控制
+
+    /// 暂停显示（保留缓冲区）。
+    public func pause() {
+        isStreaming = false
+        stopDisplayLink()
+    }
+
+    /// 暂停后继续显示。
+    public func resume() {
+        startDisplayLinkIfNeeded()
+    }
+
+    /// 立即显示全部缓冲文字并停止。
+    public func finishImmediately() {
+        visibleLength = bufferedText.length
+        applyVisibleText()
+        stopStreaming()
+    }
+
+    /// 清空所有内容（缓冲区 + 已显示文字）并停止。
+    public func reset() {
+        stopDisplayLink()
+        resetBuffer()
+        visibleLength = 0
+        textView.attributedText = NSAttributedString()
+        isStreaming = false
+        notifyContentSizeChangeIfNeeded()
+    }
+
+    private func resetBuffer() {
+        stopDisplayLink()
+        bufferedText = NSMutableAttributedString()
+        visibleLength = 0
+        textView.attributedText = NSAttributedString()
+        notifyContentSizeChangeIfNeeded()
+    }
+
+    // MARK: - Display Link 驱动
+
+    private func startDisplayLinkIfNeeded() {
+        // 没有可显示的剩余内容。
+        if visibleLength >= bufferedText.length { return }
+        // 流式已关闭：一次性显示全部并立即完成。
+        if !isStreamingEnabled {
+            isStreaming = true // 保证完成回调依然会触发
+            finishImmediately()
+            return
+        }
+        isStreaming = true
+        if displayLink != nil { return }
+        frameCounter = 0
+        // 用弱引用代理，避免 CADisplayLink 强引用 self 造成的引用环 / 崩溃。
+        // 注意：代理必须被 self 强持有，否则会立即释放，导致 displayLink 不回调、无法流式。
+        let proxy = DisplayLinkProxy(target: self)
+        displayLinkProxy = proxy
+        let link = CADisplayLink(target: proxy,
+                                 selector: #selector(DisplayLinkProxy.onDisplayLink(_:)))
+        link.add(to: .main, forMode: .common)
+        displayLink = link
+    }
+
+    private func stopDisplayLink() {
+        displayLink?.invalidate()
+        displayLink = nil
+        displayLinkProxy = nil
+    }
+
+    /// 供弱引用代理转发调用（不要直接从外部调用）。
+    @objc fileprivate func zl_handleDisplayLink(_ link: CADisplayLink) {
+        handleDisplayLink(link)
+    }
+
+    private func handleDisplayLink(_ link: CADisplayLink) {
+        let interval = max(frameInterval, 1)
+        frameCounter += 1
+        if frameCounter < interval { return }
+        frameCounter = 0
+
+        let step = max(charactersPerFrame, 1)
+        let newVisible = min(visibleLength + step, bufferedText.length)
+        if newVisible == visibleLength {
+            // 已追平缓冲区。停止，等待更多文字到达。
+            stopStreaming()
+            return
+        }
+        visibleLength = newVisible
+        applyVisibleText()
+
+        delegate?.streamingTextView?(self, didUpdateVisibleLength: visibleLength, totalLength: bufferedText.length)
+        onProgress?(visibleLength, bufferedText.length)
+
+        if visibleLength >= bufferedText.length {
+            stopStreaming()
+        }
+    }
+
+    private func stopStreaming() {
+        stopDisplayLink()
+        if isStreaming {
+            isStreaming = false
+            delegate?.streamingTextViewDidFinish?(self)
+            onComplete?()
+        }
+    }
+
+    // MARK: - 渲染
+
+    private func applyVisibleText() {
+        let length = min(visibleLength, bufferedText.length)
+        let slice = bufferedText.attributedSubstring(from: NSRange(location: 0, length: length))
+        textView.attributedText = slice
+        notifyContentSizeChangeIfNeeded()
+    }
+
+    // MARK: - 内容尺寸跟踪
+
+    public override func layoutSubviews() {
+        super.layoutSubviews()
+        // 视图缩放时宽度可能变化，进而影响换行后的文字高度。
+        notifyContentSizeChangeIfNeeded()
+    }
+
+    /// 已显示文字实际占用的尺寸（适配当前 / 最大宽度，并限制到最大 / 最小宽高）。
+    public var textContentSize: CGSize {
+        var width = maxTextWidth > 0 ? maxTextWidth : textView.bounds.width
+        if width <= 0 { width = bounds.width }
+        if width <= 0 { width = .greatestFiniteMagnitude }
+
+        var height = maxTextHeight > 0 ? maxTextHeight : textView.bounds.height
+        if height <= 0 { height = bounds.height }
+        if height <= 0 { height = .greatestFiniteMagnitude }
+
+        let fitting = textView.sizeThatFits(CGSize(width: width, height: height))
+        var w = ceil(fitting.width)
+        var h = ceil(fitting.height)
+        if maxTextWidth > 0 { w = min(w, maxTextWidth) }
+        if maxTextHeight > 0 { h = min(h, maxTextHeight) }
+        if minTextWidth > 0 { w = max(w, minTextWidth) }
+        if minTextHeight > 0 { h = max(h, minTextHeight) }
+        // 防止把 NaN / 无穷大 传给 Auto Layout（会直接崩溃）。
+        if !w.isFinite { w = 0 }
+        if !h.isFinite { h = 0 }
+        return CGSize(width: w, height: h)
+    }
+
+    private func notifyContentSizeChangeIfNeeded() {
+        let size = textContentSize
+        if size.equalTo(lastContentSize) { return }
+        lastContentSize = size
+        invalidateContentSize()
+        delegate?.streamingTextView?(self, didChangeContentSize: size)
+        onContentSizeChange?(size)
+    }
+
+    private func invalidateContentSize() {
+        invalidateIntrinsicContentSize()
+        setNeedsLayout()
+    }
+
+    public override var intrinsicContentSize: CGSize {
+        lastContentSize
+    }
+}

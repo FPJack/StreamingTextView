@@ -1,0 +1,6 @@
+framework module StreamingTextView {
+  umbrella header "StreamingTextView-umbrella.h"
+
+  export *
+  module * { export * }
+}
