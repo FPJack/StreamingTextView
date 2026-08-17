@@ -97,6 +97,13 @@ public struct GridTableConfiguration {
     /// 当内容总高度小于表格可用高度时，是否把剩余高度按各行内容高度比例分摊，填满高度。
     public var stretchRowsToFill: Bool = false
 
+    /// 是否支持双指捏合缩放整个表格。
+    public var zoomEnabled: Bool = false
+    /// 最小缩放系数。
+    public var minZoomScale: CGFloat = 0.5
+    /// 最大缩放系数。
+    public var maxZoomScale: CGFloat = 3.0
+
     /// 是否把首行作为表头（使用 `headerStyle`）。
     public var hasHeaderRow: Bool = true
 
@@ -192,14 +199,14 @@ final class GridTextCell: UICollectionViewCell {
         label.isHidden = false
     }
 
-    func configure(model: GridCellModel, style: GridCellStyle) {
+    func configure(model: GridCellModel, style: GridCellStyle, zoom: CGFloat = 1) {
         contentView.backgroundColor = style.backgroundColor
 
-        // 应用内边距。
-        insetConstraints[0].constant = style.contentInsets.top
-        insetConstraints[1].constant = style.contentInsets.left
-        insetConstraints[2].constant = -style.contentInsets.right
-        insetConstraints[3].constant = -style.contentInsets.bottom
+        // 应用内边距（随缩放）。
+        insetConstraints[0].constant = style.contentInsets.top * zoom
+        insetConstraints[1].constant = style.contentInsets.left * zoom
+        insetConstraints[2].constant = -style.contentInsets.right * zoom
+        insetConstraints[3].constant = -style.contentInsets.bottom * zoom
 
         // 自定义视图优先。
         if let provider = model.customView {
@@ -208,10 +215,10 @@ final class GridTextCell: UICollectionViewCell {
             v.translatesAutoresizingMaskIntoConstraints = false
             contentView.addSubview(v)
             NSLayoutConstraint.activate([
-                v.topAnchor.constraint(equalTo: contentView.topAnchor, constant: style.contentInsets.top),
-                v.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: style.contentInsets.left),
-                v.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -style.contentInsets.right),
-                v.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -style.contentInsets.bottom),
+                v.topAnchor.constraint(equalTo: contentView.topAnchor, constant: style.contentInsets.top * zoom),
+                v.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: style.contentInsets.left * zoom),
+                v.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -style.contentInsets.right * zoom),
+                v.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -style.contentInsets.bottom * zoom),
             ])
             hostedView = v
             return
@@ -221,12 +228,23 @@ final class GridTextCell: UICollectionViewCell {
         label.numberOfLines = style.numberOfLines
         label.textAlignment = style.textAlignment
         if let attributed = model.attributedText {
-            label.attributedText = attributed
+            label.attributedText = zoom == 1 ? attributed : GridTextCell.scaledAttributedString(attributed, zoom: zoom)
         } else {
             label.text = model.text
-            label.font = style.font
+            label.font = style.font.withSize(style.font.pointSize * zoom)
             label.textColor = style.textColor
         }
+    }
+
+    /// 把富文本里的字号按缩放系数放大 / 缩小。
+    static func scaledAttributedString(_ attributed: NSAttributedString, zoom: CGFloat) -> NSAttributedString {
+        let m = NSMutableAttributedString(attributedString: attributed)
+        m.enumerateAttribute(.font, in: NSRange(location: 0, length: m.length), options: []) { value, range, _ in
+            if let font = value as? UIFont {
+                m.addAttribute(.font, value: font.withSize(font.pointSize * zoom), range: range)
+            }
+        }
+        return m
     }
 }
 
@@ -315,6 +333,9 @@ public class GridTableView: UIView, UICollectionViewDataSource {
     private var rowHeights: [CGFloat] = []
     /// 上次布局时集合视图的尺寸，用于在尺寸变化时重新分摊剩余空间。
     private var lastLaidOutSize: CGSize = .zero
+    /// 当前缩放系数（捏合缩放）。
+    private var zoomScale: CGFloat = 1
+    private weak var pinchGesture: UIPinchGestureRecognizer?
 
     /// 吸顶生效时，网格渲染从第 1 行开始（第 0 行由吸顶表头单独渲染）。
     private var gridRowOffset: Int {
@@ -356,6 +377,11 @@ public class GridTableView: UIView, UICollectionViewDataSource {
 
         collectionView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(collectionView)
+
+        // 捏合缩放手势（默认不启用，reload 时按配置开关）。
+        let pinch = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch(_:)))
+        collectionView.addGestureRecognizer(pinch)
+        pinchGesture = pinch
 
         headerHeightConstraint = headerScroll.heightAnchor.constraint(equalToConstant: 0)
         collectionTopConstraint = collectionView.topAnchor.constraint(equalTo: headerScroll.bottomAnchor)
@@ -505,47 +531,69 @@ public class GridTableView: UIView, UICollectionViewDataSource {
         rowHeights = baseRowHeights
     }
 
-    /// 若开启了填充，则把「可用尺寸 - 内容尺寸」的剩余空间按各列 / 各行的内容比例分摊。
+    /// 计算展示尺寸：先按缩放系数缩放内容尺寸，再（可选）把剩余空间按比例分摊填充。
     private func applyStretch(availableWidth: CGFloat, availableHeight: CGFloat) {
         guard columnCount > 0 else { return }
-        columnWidths = baseColumnWidths
-        rowHeights = baseRowHeights
+        // 1) 先按 zoom 缩放原始内容尺寸。
+        columnWidths = baseColumnWidths.map { ceil($0 * zoomScale) }
+        rowHeights = baseRowHeights.map { ceil($0 * zoomScale) }
         let sep = configuration.separator.width
 
-        // 列：分摊剩余宽度。
+        // 2) 列：分摊剩余宽度（以缩放后的尺寸为基准）。
         if configuration.stretchColumnsToFill {
-            let content = baseColumnWidths.reduce(0, +) + sep * CGFloat(max(columnCount - 1, 0))
+            let zoomed = columnWidths
+            let content = zoomed.reduce(0, +) + sep * CGFloat(max(columnCount - 1, 0))
             let extra = availableWidth - content
             if extra > 0.5 {
-                let baseSum = baseColumnWidths.reduce(0, +)
+                let baseSum = zoomed.reduce(0, +)
                 if baseSum > 0 {
                     for i in 0..<columnCount {
-                        columnWidths[i] = baseColumnWidths[i] + extra * (baseColumnWidths[i] / baseSum)
+                        columnWidths[i] = zoomed[i] + extra * (zoomed[i] / baseSum)
                     }
                 } else {
                     let each = extra / CGFloat(columnCount)
-                    columnWidths = baseColumnWidths.map { $0 + each }
+                    columnWidths = zoomed.map { $0 + each }
                 }
             }
         }
 
-        // 行：仅对参与网格渲染的行分摊剩余高度（吸顶表头行不拉伸）。
+        // 3) 行：仅对参与网格渲染的行分摊剩余高度（吸顶表头行不拉伸）。
         if configuration.stretchRowsToFill, gridRowCount > 0 {
             let start = gridRowOffset
-            let gridBase = baseRowHeights[start...]
-            let content = gridBase.reduce(0, +) + sep * CGFloat(max(gridRowCount - 1, 0))
+            let zoomed = Array(rowHeights[start...])
+            let content = zoomed.reduce(0, +) + sep * CGFloat(max(gridRowCount - 1, 0))
             let extra = availableHeight - content
             if extra > 0.5 {
-                let baseSum = gridBase.reduce(0, +)
+                let baseSum = zoomed.reduce(0, +)
                 if baseSum > 0 {
-                    for i in start..<rowCount {
-                        rowHeights[i] = baseRowHeights[i] + extra * (baseRowHeights[i] / baseSum)
+                    for (idx, i) in (start..<rowCount).enumerated() {
+                        rowHeights[i] = zoomed[idx] + extra * (zoomed[idx] / baseSum)
                     }
                 } else {
                     let each = extra / CGFloat(gridRowCount)
-                    for i in start..<rowCount { rowHeights[i] = baseRowHeights[i] + each }
+                    for i in start..<rowCount { rowHeights[i] = rowHeights[i] + each }
                 }
             }
+        }
+    }
+
+    // MARK: 缩放
+
+    /// 捏合缩放手势处理。
+    @objc private func handlePinch(_ gesture: UIPinchGestureRecognizer) {
+        guard configuration.zoomEnabled, columnCount > 0 else { return }
+        switch gesture.state {
+        case .changed:
+            let newScale = min(max(zoomScale * gesture.scale, configuration.minZoomScale), configuration.maxZoomScale)
+            gesture.scale = 1
+            guard abs(newScale - zoomScale) > 0.001 else { return }
+            zoomScale = newScale
+            applyStretch(availableWidth: collectionView.bounds.width, availableHeight: collectionView.bounds.height)
+            buildStickyHeader()
+            collectionView.setCollectionViewLayout(makeLayout(), animated: false)
+            collectionView.reloadData()
+        default:
+            break
         }
     }
 
@@ -695,7 +743,10 @@ public class GridTableView: UIView, UICollectionViewDataSource {
     private func makeHeaderCellView(model: GridCellModel?, style: GridCellStyle, frame: CGRect) -> UIView {
         let container = UIView(frame: frame)
         container.backgroundColor = style.backgroundColor
-        let insets = style.contentInsets
+        let insets = UIEdgeInsets(top: style.contentInsets.top * zoomScale,
+                                  left: style.contentInsets.left * zoomScale,
+                                  bottom: style.contentInsets.bottom * zoomScale,
+                                  right: style.contentInsets.right * zoomScale)
 
         if let provider = model?.customView {
             let v = provider()
@@ -712,10 +763,10 @@ public class GridTableView: UIView, UICollectionViewDataSource {
         label.numberOfLines = style.numberOfLines
         label.textAlignment = style.textAlignment
         if let attributed = model?.attributedText {
-            label.attributedText = attributed
+            label.attributedText = zoomScale == 1 ? attributed : GridTextCell.scaledAttributedString(attributed, zoom: zoomScale)
         } else {
             label.text = model?.text
-            label.font = style.font
+            label.font = style.font.withSize(style.font.pointSize * zoomScale)
             label.textColor = style.textColor
         }
         container.addSubview(label)
@@ -766,7 +817,7 @@ public class GridTableView: UIView, UICollectionViewDataSource {
                                                       for: indexPath) as! GridTextCell
         let (r, c) = position(for: indexPath.item)
         if let m = model(row: r, column: c) {
-            cell.configure(model: m, style: effectiveStyle(row: r, column: c))
+            cell.configure(model: m, style: effectiveStyle(row: r, column: c), zoom: zoomScale)
         }
         return cell
     }

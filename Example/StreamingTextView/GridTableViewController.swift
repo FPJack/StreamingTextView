@@ -68,6 +68,10 @@ class GridTableViewController: UIViewController {
         // 内容不足以填满表格时，按比例分摊剩余宽/高。
         config.stretchColumnsToFill = stretchToFill
         config.stretchRowsToFill = stretchToFill
+        // 支持双指捏合缩放整个表格。
+        config.zoomEnabled = true
+        config.minZoomScale = 0.6
+        config.maxZoomScale = 2.5
 
         config.separator = GridSeparatorStyle(width: 1, color: UIColor(white: 0.85, alpha: 1))
         config.border = GridBorderStyle(width: 1, color: UIColor(white: 0.75, alpha: 1), cornerRadius: 10)

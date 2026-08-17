@@ -20,10 +20,10 @@
 		84DC571B302EE9F700A48AD7 /* ChatViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84DC5714302EE9F700A48AD7 /* ChatViewController.swift */; };
 		84DC571C302EE9F700A48AD7 /* DownBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84DC5715302EE9F700A48AD7 /* DownBridge.swift */; };
 		84DC571D302EE9F700A48AD7 /* TableStreamViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84DC5717302EE9F700A48AD7 /* TableStreamViewController.swift */; };
-		84DC5740302EE9F700A48AD7 /* GridTableViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84DC5741302EE9F700A48AD7 /* GridTableViewController.swift */; };
 		84DC5721302EEA8500A48AD7 /* TestObj.m in Sources */ = {isa = PBXBuildFile; fileRef = 84DC5720302EEA8500A48AD7 /* TestObj.m */; };
 		84DC5731302EE9F700A48AD7 /* TextTapGesture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84DC5730302EE9F700A48AD7 /* TextTapGesture.swift */; };
 		84DC5733302EE9F700A48AD7 /* ImagePreviewer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84DC5732302EE9F700A48AD7 /* ImagePreviewer.swift */; };
+		84DC5740302EE9F700A48AD7 /* GridTableViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84DC5741302EE9F700A48AD7 /* GridTableViewController.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -55,13 +55,13 @@
 		84DC5715302EE9F700A48AD7 /* DownBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownBridge.swift; sourceTree = "<group>"; };
 		84DC5716302EE9F700A48AD7 /* READMETest.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = READMETest.md; sourceTree = "<group>"; };
 		84DC5717302EE9F700A48AD7 /* TableStreamViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TableStreamViewController.swift; sourceTree = "<group>"; };
-		84DC5741302EE9F700A48AD7 /* GridTableViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GridTableViewController.swift; sourceTree = "<group>"; };
 		84DC5718302EE9F700A48AD7 /* Test.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = Test.md; sourceTree = "<group>"; };
 		84DC571E302EEA8400A48AD7 /* StreamingTextView_Example-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "StreamingTextView_Example-Bridging-Header.h"; sourceTree = "<group>"; };
 		84DC571F302EEA8500A48AD7 /* TestObj.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = TestObj.h; sourceTree = "<group>"; };
 		84DC5720302EEA8500A48AD7 /* TestObj.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = TestObj.m; sourceTree = "<group>"; };
 		84DC5730302EE9F700A48AD7 /* TextTapGesture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextTapGesture.swift; sourceTree = "<group>"; };
 		84DC5732302EE9F700A48AD7 /* ImagePreviewer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImagePreviewer.swift; sourceTree = "<group>"; };
+		84DC5741302EE9F700A48AD7 /* GridTableViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GridTableViewController.swift; sourceTree = "<group>"; };
 		AF0CC9B48EB7CDA951507E4B /* LICENSE */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text; name = LICENSE; path = ../LICENSE; sourceTree = "<group>"; };
 		B0CA5A635D41EE9644AB5724 /* StreamingTextView.podspec */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text; name = StreamingTextView.podspec; path = ../StreamingTextView.podspec; sourceTree = "<group>"; xcLanguageSpecificationIdentifier = xcode.lang.ruby; };
 		BE0AD88368C4B1D915C3C210 /* Pods-StreamingTextView_Example.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-StreamingTextView_Example.release.xcconfig"; path = "Target Support Files/Pods-StreamingTextView_Example/Pods-StreamingTextView_Example.release.xcconfig"; sourceTree = "<group>"; };
@@ -244,10 +244,12 @@
 				TargetAttributes = {
 					607FACCF1AFB9204008FA782 = {
 						CreatedOnToolsVersion = 6.3.1;
+						DevelopmentTeam = 45VN9U3A54;
 						LastSwiftMigration = 2630;
 					};
 					607FACE41AFB9204008FA782 = {
 						CreatedOnToolsVersion = 6.3.1;
+						DevelopmentTeam = 45VN9U3A54;
 						LastSwiftMigration = 0900;
 						TestTargetID = 607FACCF1AFB9204008FA782;
 					};
@@ -543,11 +545,12 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_EXPLICIT_MODULES = NO;
 				CLANG_ENABLE_MODULES = YES;
+				DEVELOPMENT_TEAM = 45VN9U3A54;
 				INFOPLIST_FILE = StreamingTextView/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 13;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
 				MODULE_NAME = ExampleApp;
-				PRODUCT_BUNDLE_IDENTIFIER = "org.cocoapods.demo.$(PRODUCT_NAME:rfc1034identifier)";
+				PRODUCT_BUNDLE_IDENTIFIER = fanpentest;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_ENABLE_EXPLICIT_MODULES = NO;
 				SWIFT_INCLUDE_PATHS = "$(inherited) \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\"";
@@ -565,11 +568,12 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_EXPLICIT_MODULES = NO;
 				CLANG_ENABLE_MODULES = YES;
+				DEVELOPMENT_TEAM = 45VN9U3A54;
 				INFOPLIST_FILE = StreamingTextView/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 13;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
 				MODULE_NAME = ExampleApp;
-				PRODUCT_BUNDLE_IDENTIFIER = "org.cocoapods.demo.$(PRODUCT_NAME:rfc1034identifier)";
+				PRODUCT_BUNDLE_IDENTIFIER = fanpentest;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_ENABLE_EXPLICIT_MODULES = NO;
 				SWIFT_INCLUDE_PATHS = "$(inherited) \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\"";
@@ -584,6 +588,7 @@
 			baseConfigurationReference = 1D729E9B7E7200B227BC1C02 /* Pods-StreamingTextView_Tests.debug.xcconfig */;
 			buildSettings = {
 				CLANG_ENABLE_EXPLICIT_MODULES = NO;
+				DEVELOPMENT_TEAM = 45VN9U3A54;
 				FRAMEWORK_SEARCH_PATHS = (
 					"$(PLATFORM_DIR)/Developer/Library/Frameworks",
 					"$(inherited)",
@@ -595,7 +600,7 @@
 				INFOPLIST_FILE = Tests/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 13;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @loader_path/Frameworks";
-				PRODUCT_BUNDLE_IDENTIFIER = "org.cocoapods.$(PRODUCT_NAME:rfc1034identifier)";
+				PRODUCT_BUNDLE_IDENTIFIER = fanpentest;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_ENABLE_EXPLICIT_MODULES = NO;
 				SWIFT_INCLUDE_PATHS = "$(inherited) \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\"";
@@ -610,6 +615,7 @@
 			baseConfigurationReference = FE911E1DC3357347A77C40CB /* Pods-StreamingTextView_Tests.release.xcconfig */;
 			buildSettings = {
 				CLANG_ENABLE_EXPLICIT_MODULES = NO;
+				DEVELOPMENT_TEAM = 45VN9U3A54;
 				FRAMEWORK_SEARCH_PATHS = (
 					"$(PLATFORM_DIR)/Developer/Library/Frameworks",
 					"$(inherited)",
