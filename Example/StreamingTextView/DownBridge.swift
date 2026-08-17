@@ -149,6 +149,17 @@ public class MarkdownRenderOptions: NSObject {
     /// 链接点击事件回调（参数为链接 URL）。
     public var onLinkTapped: ((URL) -> Void)?
 
+    /// 表格配置：外部可传入以自定义 Markdown 里表格（`GridTableView`）的样式与行为
+    /// （列宽 / 分割线 / 边框 / 表头样式 / 滑动模式等）。为 nil 时使用内部默认配置。
+    /// 注意：`GridTableView` 需要 iOS 13+，此配置在 iOS 13 以下不生效。
+    @available(iOS 13.0, *)
+    public var tableConfiguration: GridTableConfiguration? {
+        get { _tableConfiguration as? GridTableConfiguration }
+        set { _tableConfiguration = newValue }
+    }
+    /// 类型擦除存储（避免给存储属性直接标注 @available 带来的限制）。
+    private var _tableConfiguration: Any?
+
     /// 承载富文本的 textView。设置后，`attributedString(fromMarkdown:options:)`
     /// 会自动为其绑定手势交互（图片点击 + 链接跳转），无需外部再手动调用 `bindGestures(to:)`。
     public weak var textView: UITextView?
@@ -253,9 +264,11 @@ public class DownBridge: NSObject {
             case .table(let tableRows):
                 if #available(iOS 13.0, *) {
                     let cellModels = tableRows.map { row in row.map { GridCellModel(text: $0) } }
-                    let tableConfig = makeTableConfiguration(maxWidth: options.maxImageWidth,
-                                                             fontSize: options.fontSize,
-                                                             textColor: options.textColor)
+                    // 优先使用外部传入的表格配置；未提供则用内部默认配置。
+                    let tableConfig = options.tableConfiguration
+                        ?? makeTableConfiguration(maxWidth: options.maxImageWidth,
+                                                  fontSize: options.fontSize,
+                                                  textColor: options.textColor)
                     let attachment = GridTableAttachment(rows: cellModels, configuration: tableConfig)
                     // 表格自成一块，前后补换行，保证独占段落。
                     if result.length > 0 { result.append(NSAttributedString(string: "\n", attributes: newlineAttrs)) }

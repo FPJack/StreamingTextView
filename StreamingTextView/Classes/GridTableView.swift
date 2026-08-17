@@ -682,7 +682,10 @@ public class GridTableView: UIView, UICollectionViewDataSource {
 
         let indexPaths = (oldItemCount..<newItemCount).map { IndexPath(item: $0, section: 0) }
 
-        if streamAnimated {
+        // 仅在「视图已在窗口层级 && App 处于前台」时才做批量插入动画；
+        // 否则（如 App 退后台 / 视图不在窗口）UICollectionView 的 performBatchUpdates
+        // 可能崩溃，降级为 reloadData 以保证安全。
+        if streamAnimated && canAnimateCollectionUpdates {
             collectionView.performBatchUpdates({
                 collectionView.insertItems(at: indexPaths)
             }, completion: nil)
@@ -700,6 +703,13 @@ public class GridTableView: UIView, UICollectionViewDataSource {
             stopRowStreamingTimer()
             finishRowStreaming()
         }
+    }
+
+    /// 是否可以安全地对集合视图做批量更新动画：
+    /// 需要视图已加入窗口层级，且 App 处于前台（后台时 UICollectionView 批量更新会崩溃）。
+    private var canAnimateCollectionUpdates: Bool {
+        guard window != nil else { return false }
+        return UIApplication.shared.applicationState == .active
     }
 
     // MARK: 布局

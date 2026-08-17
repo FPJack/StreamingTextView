@@ -14,7 +14,6 @@
 | Swift 4.x | >= 0.4.x | Xcode 9+ | iOS 8+ | Legacy Swift 4 support |
 | Swift 3.x | 0.3.x | Xcode 8+ | iOS 8+ | Deprecated support |
 
-
 ```swift
 public struct MarkdownToHTML: DownHTMLRenderable {
   
