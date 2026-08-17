@@ -1,0 +1,753 @@
+//
+//  GridTableView.swift
+//  StreamingTextView
+//
+//  模仿 Flutter `Table` 的网格表格组件，基于 UICollectionView + Compositional Layout 实现。
+//
+//  特性：
+//  1. 每个 item 的宽 / 高自动计算（同列共享宽度、同行共享高度），可设置最大 / 最小宽高；
+//     可设置整体左右滑动或上下滑动。
+//  2. 表头（首行）可单独设置样式。
+//  3. 网格分割线可设置宽度与颜色。
+//  4. 整个表格可设置边框（颜色 / 宽度 / 圆角）。
+//  5. 通过 Model + Style + Configuration 分层设计，复用性 / 自定义性良好。
+//
+
+import UIKit
+
+// MARK: - 样式
+
+/// 单元格样式（表头与普通单元格可分别配置；单个 Model 也可覆盖）。
+public struct GridCellStyle {
+
+    /// 文字字体。
+    public var font: UIFont = .systemFont(ofSize: 15)
+    /// 文字颜色。
+    public var textColor: UIColor = .darkText
+    /// 单元格背景色。
+    public var backgroundColor: UIColor = .white
+    /// 文字对齐。
+    public var textAlignment: NSTextAlignment = .left
+    /// 文字最大行数（0 表示不限制）。
+    public var numberOfLines: Int = 0
+    /// 文字四周内边距。
+    public var contentInsets: UIEdgeInsets = UIEdgeInsets(top: 8, left: 12, bottom: 8, right: 12)
+
+    public init() {}
+}
+
+/// 网格分割线样式。
+public struct GridSeparatorStyle {
+    /// 分割线粗细（即单元格之间的间隙宽度）。
+    public var width: CGFloat = 1.0 / UIScreen.main.scale
+    /// 分割线颜色。
+    public var color: UIColor = UIColor(white: 0.85, alpha: 1.0)
+
+    public init() {}
+    public init(width: CGFloat, color: UIColor) {
+        self.width = width
+        self.color = color
+    }
+}
+
+/// 表格外边框样式。
+public struct GridBorderStyle {
+    /// 边框宽度。
+    public var width: CGFloat = 1.0 / UIScreen.main.scale
+    /// 边框颜色。
+    public var color: UIColor = UIColor(white: 0.82, alpha: 1.0)
+    /// 边框圆角。
+    public var cornerRadius: CGFloat = 8.0
+
+    public init() {}
+    public init(width: CGFloat, color: UIColor, cornerRadius: CGFloat) {
+        self.width = width
+        self.color = color
+        self.cornerRadius = cornerRadius
+    }
+}
+
+/// 表格滑动模式。
+public enum GridScrollMode {
+    /// 同时支持左右 + 上下滑动。
+    case both
+    /// 仅左右滑动（锁定纵向）。
+    case horizontal
+    /// 仅上下滑动（锁定横向）。
+    case vertical
+}
+
+/// 表格整体配置。
+public struct GridTableConfiguration {
+
+    /// 滑动模式：`.both` 双向、`.horizontal` 仅左右、`.vertical` 仅上下。
+    public var scrollMode: GridScrollMode = .both
+
+    /// 列最大宽度（0 表示不限制，宽度完全由内容决定）。
+    public var maxColumnWidth: CGFloat = 0
+    /// 列最小宽度（0 表示不限制）。
+    public var minColumnWidth: CGFloat = 0
+    /// 行最大高度（0 表示不限制）。
+    public var maxRowHeight: CGFloat = 0
+    /// 行最小高度（0 表示不限制）。
+    public var minRowHeight: CGFloat = 0
+
+    /// 是否把首行作为表头（使用 `headerStyle`）。
+    public var hasHeaderRow: Bool = true
+
+    /// 表头是否吸顶（滚动时首行固定在顶部，仅在 `hasHeaderRow == true` 时生效）。
+    public var stickyHeader: Bool = false
+
+    /// 普通单元格默认样式。
+    public var cellStyle = GridCellStyle()
+    /// 表头样式（`hasHeaderRow == true` 时用于首行）。
+    public var headerStyle: GridCellStyle = {
+        var s = GridCellStyle()
+        s.font = .boldSystemFont(ofSize: 15)
+        s.textColor = .black
+        s.backgroundColor = UIColor(white: 0.96, alpha: 1.0)
+        return s
+    }()
+
+    /// 分割线样式。
+    public var separator = GridSeparatorStyle()
+    /// 外边框样式。
+    public var border = GridBorderStyle()
+
+    public init() {}
+}
+
+// MARK: - 数据模型
+
+/// 单元格数据模型。
+public struct GridCellModel {
+    /// 纯文本内容（与 `attributedText` 二选一）。
+    public var text: String?
+    /// 富文本内容（优先于 `text`）。
+    public var attributedText: NSAttributedString?
+    /// 单元格样式覆盖（为 nil 时使用表格配置里的默认 / 表头样式）。
+    public var styleOverride: GridCellStyle?
+
+    /// 自定义视图提供者（返回一个 UIView 填充到单元格内）。设置后优先于文本内容。
+    public var customView: (() -> UIView)?
+    /// 使用自定义视图时的内容尺寸（用于自动布局测量；不含内边距）。
+    public var customViewSize: CGSize?
+
+    public init(text: String?, styleOverride: GridCellStyle? = nil) {
+        self.text = text
+        self.styleOverride = styleOverride
+    }
+
+    public init(attributedText: NSAttributedString, styleOverride: GridCellStyle? = nil) {
+        self.attributedText = attributedText
+        self.styleOverride = styleOverride
+    }
+
+    /// 使用自定义视图初始化。
+    /// - Parameters:
+    ///   - customView: 返回自定义视图的闭包（每次配置单元格时调用）。
+    ///   - size: 自定义视图内容尺寸（用于测量布局）。
+    ///   - styleOverride: 可选样式（主要用背景色 / 内边距）。
+    public init(customView: @escaping () -> UIView, size: CGSize, styleOverride: GridCellStyle? = nil) {
+        self.customView = customView
+        self.customViewSize = size
+        self.styleOverride = styleOverride
+    }
+}
+
+// MARK: - 单元格
+
+final class GridTextCell: UICollectionViewCell {
+
+    static let reuseID = "GridTextCell"
+
+    private let label = UILabel()
+    private var insetConstraints: [NSLayoutConstraint] = []
+    /// 当前承载的自定义视图（复用时移除）。
+    private var hostedView: UIView?
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        label.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(label)
+        let top = label.topAnchor.constraint(equalTo: contentView.topAnchor)
+        let left = label.leadingAnchor.constraint(equalTo: contentView.leadingAnchor)
+        let right = label.trailingAnchor.constraint(equalTo: contentView.trailingAnchor)
+        let bottom = label.bottomAnchor.constraint(equalTo: contentView.bottomAnchor)
+        insetConstraints = [top, left, right, bottom]
+        NSLayoutConstraint.activate(insetConstraints)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func prepareForReuse() {
+        super.prepareForReuse()
+        hostedView?.removeFromSuperview()
+        hostedView = nil
+        label.isHidden = false
+    }
+
+    func configure(model: GridCellModel, style: GridCellStyle) {
+        contentView.backgroundColor = style.backgroundColor
+
+        // 应用内边距。
+        insetConstraints[0].constant = style.contentInsets.top
+        insetConstraints[1].constant = style.contentInsets.left
+        insetConstraints[2].constant = -style.contentInsets.right
+        insetConstraints[3].constant = -style.contentInsets.bottom
+
+        // 自定义视图优先。
+        if let provider = model.customView {
+            label.isHidden = true
+            let v = provider()
+            v.translatesAutoresizingMaskIntoConstraints = false
+            contentView.addSubview(v)
+            NSLayoutConstraint.activate([
+                v.topAnchor.constraint(equalTo: contentView.topAnchor, constant: style.contentInsets.top),
+                v.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: style.contentInsets.left),
+                v.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -style.contentInsets.right),
+                v.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -style.contentInsets.bottom),
+            ])
+            hostedView = v
+            return
+        }
+
+        label.isHidden = false
+        label.numberOfLines = style.numberOfLines
+        label.textAlignment = style.textAlignment
+        if let attributed = model.attributedText {
+            label.attributedText = attributed
+        } else {
+            label.text = model.text
+            label.font = style.font
+            label.textColor = style.textColor
+        }
+    }
+}
+
+// MARK: - 表格视图
+
+@available(iOS 13.0, *)
+public class GridTableView: UIView, UICollectionViewDataSource {
+
+    // MARK: 公开接口
+
+    /// 表格配置。修改后需调用 `reload()` 生效。
+    public var configuration = GridTableConfiguration()
+
+    /// 表格数据：二维数组 `rows[row][column]`。要求每行列数一致。
+    public private(set) var rows: [[GridCellModel]] = []
+
+    /// 单元格点击回调（行、列、模型）。
+    public var onSelectCell: ((_ row: Int, _ column: Int, _ model: GridCellModel) -> Void)?
+
+    /// 设置数据并刷新。
+    /// - Parameters:
+    ///   - rows: 二维单元格数据。
+    ///   - configuration: 可选，新的表格配置。
+    public func setRows(_ rows: [[GridCellModel]], configuration: GridTableConfiguration? = nil) {
+        if let configuration = configuration { self.configuration = configuration }
+        self.rows = rows
+        reload()
+    }
+
+    /// 重新计算尺寸并刷新布局。
+    public func reload() {
+        recomputeCounts()
+        computeSizes()
+        applyBorderAndSeparatorColor()
+        applyScrollMode()
+        buildStickyHeader()
+        collectionView.setCollectionViewLayout(makeLayout(), animated: false)
+        collectionView.reloadData()
+        invalidateIntrinsicContentSize()
+    }
+
+    // MARK: 私有状态
+
+    private lazy var collectionView: UICollectionView = {
+        let cv = UICollectionView(frame: bounds, collectionViewLayout: UICollectionViewFlowLayout())
+        cv.dataSource = self
+        cv.delegate = self
+        cv.register(GridTextCell.self, forCellWithReuseIdentifier: GridTextCell.reuseID)
+        cv.alwaysBounceVertical = false
+        cv.alwaysBounceHorizontal = false
+        return cv
+    }()
+
+    /// 吸顶表头容器（横向可随内容同步偏移，但不接收交互）。
+    private lazy var headerScroll: UIScrollView = {
+        let sv = UIScrollView()
+        sv.isUserInteractionEnabled = false
+        sv.showsHorizontalScrollIndicator = false
+        sv.showsVerticalScrollIndicator = false
+        return sv
+    }()
+    private let headerContent = UIView()
+
+    private var rowCount = 0
+    private var columnCount = 0
+    private var columnWidths: [CGFloat] = []
+    private var rowHeights: [CGFloat] = []
+
+    /// 吸顶生效时，网格渲染从第 1 行开始（第 0 行由吸顶表头单独渲染）。
+    private var gridRowOffset: Int {
+        (configuration.stickyHeader && configuration.hasHeaderRow && rowCount > 0) ? 1 : 0
+    }
+    /// 参与网格渲染的行数。
+    private var gridRowCount: Int { max(rowCount - gridRowOffset, 0) }
+
+    private var headerHeightConstraint: NSLayoutConstraint!
+    private var collectionTopConstraint: NSLayoutConstraint!
+
+    /// 表格头部自定义视图（位于吸顶表头之上，固定不随内容滚动；可放复制等操作控件）。
+    public private(set) var tableHeaderView: UIView?
+    /// 表格尾部自定义视图（位于内容底部，固定不随内容滚动）。
+    public private(set) var tableFooterView: UIView?
+    private var tableHeaderHeight: CGFloat = 0
+    private var tableFooterHeight: CGFloat = 0
+    /// 头 / 尾视图 + 垂直约束链（随头尾视图变化重建）。
+    private var accessoryConstraints: [NSLayoutConstraint] = []
+
+    // MARK: 初始化
+
+    public override init(frame: CGRect) {
+        super.init(frame: frame)
+        setup()
+    }
+
+    public required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        setup()
+    }
+
+    private func setup() {
+        clipsToBounds = true
+
+        headerScroll.translatesAutoresizingMaskIntoConstraints = false
+        headerScroll.addSubview(headerContent)
+        addSubview(headerScroll)
+
+        collectionView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(collectionView)
+
+        headerHeightConstraint = headerScroll.heightAnchor.constraint(equalToConstant: 0)
+        collectionTopConstraint = collectionView.topAnchor.constraint(equalTo: headerScroll.bottomAnchor)
+
+        // 静态的水平约束 + 吸顶表头高度 + 集合视图相对吸顶表头的间距。
+        NSLayoutConstraint.activate([
+            headerScroll.leadingAnchor.constraint(equalTo: leadingAnchor),
+            headerScroll.trailingAnchor.constraint(equalTo: trailingAnchor),
+            collectionView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            collectionView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            headerHeightConstraint,
+            collectionTopConstraint,
+        ])
+
+        rebuildVerticalChain()
+    }
+
+    // MARK: 头 / 尾自定义视图
+
+    /// 设置表格头部自定义视图（固定在最顶部）。
+    /// - Parameters:
+    ///   - view: 自定义视图；传 nil 表示移除。
+    ///   - height: 固定高度（<=0 时由视图自身的 Auto Layout 约束决定高度）。
+    public func setTableHeaderView(_ view: UIView?, height: CGFloat = 0) {
+        tableHeaderView?.removeFromSuperview()
+        tableHeaderView = view
+        tableHeaderHeight = height
+        if let v = view {
+            v.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(v)
+        }
+        rebuildVerticalChain()
+    }
+
+    /// 设置表格尾部自定义视图（固定在最底部）。
+    /// - Parameters:
+    ///   - view: 自定义视图；传 nil 表示移除。
+    ///   - height: 固定高度（<=0 时由视图自身的 Auto Layout 约束决定高度）。
+    public func setTableFooterView(_ view: UIView?, height: CGFloat = 0) {
+        tableFooterView?.removeFromSuperview()
+        tableFooterView = view
+        tableFooterHeight = height
+        if let v = view {
+            v.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(v)
+        }
+        rebuildVerticalChain()
+    }
+
+    /// 重建「头部视图 → 吸顶表头 → 集合视图 → 尾部视图」的垂直约束链。
+    private func rebuildVerticalChain() {
+        NSLayoutConstraint.deactivate(accessoryConstraints)
+        accessoryConstraints.removeAll()
+
+        // 顶部：可选头部视图 → 吸顶表头。
+        var topRef = topAnchor
+        if let h = tableHeaderView {
+            accessoryConstraints.append(contentsOf: [
+                h.topAnchor.constraint(equalTo: topAnchor),
+                h.leadingAnchor.constraint(equalTo: leadingAnchor),
+                h.trailingAnchor.constraint(equalTo: trailingAnchor),
+            ])
+            if tableHeaderHeight > 0 {
+                accessoryConstraints.append(h.heightAnchor.constraint(equalToConstant: tableHeaderHeight))
+            }
+            topRef = h.bottomAnchor
+        }
+        accessoryConstraints.append(headerScroll.topAnchor.constraint(equalTo: topRef))
+
+        // 底部：集合视图 → 可选尾部视图。
+        var bottomRef = bottomAnchor
+        if let f = tableFooterView {
+            accessoryConstraints.append(contentsOf: [
+                f.bottomAnchor.constraint(equalTo: bottomAnchor),
+                f.leadingAnchor.constraint(equalTo: leadingAnchor),
+                f.trailingAnchor.constraint(equalTo: trailingAnchor),
+            ])
+            if tableFooterHeight > 0 {
+                accessoryConstraints.append(f.heightAnchor.constraint(equalToConstant: tableFooterHeight))
+            }
+            bottomRef = f.topAnchor
+        }
+        accessoryConstraints.append(collectionView.bottomAnchor.constraint(equalTo: bottomRef))
+
+        NSLayoutConstraint.activate(accessoryConstraints)
+    }
+
+    // MARK: 尺寸计算
+
+    private func recomputeCounts() {
+        rowCount = rows.count
+        columnCount = rows.map { $0.count }.max() ?? 0
+    }
+
+    /// 取某行某列的有效样式（Model 覆盖 > 表头 / 默认样式）。
+    private func effectiveStyle(row: Int, column: Int) -> GridCellStyle {
+        if let override = model(row: row, column: column)?.styleOverride { return override }
+        if configuration.hasHeaderRow && row == 0 { return configuration.headerStyle }
+        return configuration.cellStyle
+    }
+
+    private func model(row: Int, column: Int) -> GridCellModel? {
+        guard row >= 0, row < rows.count else { return nil }
+        let cols = rows[row]
+        guard column >= 0, column < cols.count else { return nil }
+        return cols[column]
+    }
+
+    /// 计算列宽（同列取最大内容宽，受 min/max 约束）与行高（同行取最大内容高）。
+    private func computeSizes() {
+        guard rowCount > 0, columnCount > 0 else {
+            columnWidths = []; rowHeights = []; return
+        }
+
+        // 1) 列宽：每列取该列所有单元格内容宽度的最大值。
+        columnWidths = Array(repeating: 0, count: columnCount)
+        for c in 0..<columnCount {
+            var maxW: CGFloat = 0
+            for r in 0..<rowCount {
+                guard let m = model(row: r, column: c) else { continue }
+                let style = effectiveStyle(row: r, column: c)
+                let limit = configuration.maxColumnWidth > 0 ? configuration.maxColumnWidth : .greatestFiniteMagnitude
+                maxW = max(maxW, measure(m, style: style, maxWidth: limit).width)
+            }
+            if configuration.maxColumnWidth > 0 { maxW = min(maxW, configuration.maxColumnWidth) }
+            if configuration.minColumnWidth > 0 { maxW = max(maxW, configuration.minColumnWidth) }
+            columnWidths[c] = ceil(maxW)
+        }
+
+        // 2) 行高：在确定列宽后，每行取该行所有单元格内容高度的最大值。
+        rowHeights = Array(repeating: 0, count: rowCount)
+        for r in 0..<rowCount {
+            var maxH: CGFloat = 0
+            for c in 0..<columnCount {
+                guard let m = model(row: r, column: c) else { continue }
+                let style = effectiveStyle(row: r, column: c)
+                maxH = max(maxH, measure(m, style: style, maxWidth: columnWidths[c]).height)
+            }
+            if configuration.maxRowHeight > 0 { maxH = min(maxH, configuration.maxRowHeight) }
+            if configuration.minRowHeight > 0 { maxH = max(maxH, configuration.minRowHeight) }
+            rowHeights[r] = ceil(maxH)
+        }
+    }
+
+    /// 测量单元格内容尺寸（含内边距）。
+    private func measure(_ model: GridCellModel, style: GridCellStyle, maxWidth: CGFloat) -> CGSize {
+        let insets = style.contentInsets
+
+        // 自定义视图：直接用给定内容尺寸 + 内边距。
+        if let custom = model.customViewSize {
+            var w = custom.width + insets.left + insets.right
+            if maxWidth != .greatestFiniteMagnitude { w = min(w, maxWidth) }
+            return CGSize(width: ceil(w), height: ceil(custom.height + insets.top + insets.bottom))
+        }
+
+        let textMaxWidth: CGFloat = maxWidth == .greatestFiniteMagnitude
+            ? maxWidth
+            : max(0, maxWidth - insets.left - insets.right)
+
+        let attributed = attributedString(for: model, style: style)
+        let bounding = attributed.boundingRect(
+            with: CGSize(width: textMaxWidth, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            context: nil)
+
+        return CGSize(width: ceil(bounding.width) + insets.left + insets.right,
+                      height: ceil(bounding.height) + insets.top + insets.bottom)
+    }
+
+    /// 生成单元格用于测量 / 显示的富文本。
+    private func attributedString(for model: GridCellModel, style: GridCellStyle) -> NSAttributedString {
+        if let attributed = model.attributedText { return attributed }
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.alignment = style.textAlignment
+        return NSAttributedString(string: model.text ?? "", attributes: [
+            .font: style.font,
+            .foregroundColor: style.textColor,
+            .paragraphStyle: paragraph,
+        ])
+    }
+
+    // MARK: 布局
+
+    private func makeLayout() -> UICollectionViewLayout {
+        let config = UICollectionViewCompositionalLayoutConfiguration()
+        // `.horizontal` 模式主轴设为横向；`.both` / `.vertical` 用纵向（横向溢出由绝对宽度自然产生可滚动内容）。
+        config.scrollDirection = (configuration.scrollMode == .horizontal) ? .horizontal : .vertical
+
+        // 双向滑动时用会在任意方向 bounds 变化都重算可见属性的子类，避免斜向快速滑动漏掉 cell。
+        let layout = GridCompositionalLayout(sectionProvider: { [weak self] _, _ in
+            self?.makeSection()
+        }, configuration: config)
+        return layout
+    }
+
+    /// 按滑动模式设置集合视图的滚动 / 回弹 / 指示器行为。
+    private func applyScrollMode() {
+        switch configuration.scrollMode {
+        case .both:
+            collectionView.alwaysBounceHorizontal = true
+            collectionView.alwaysBounceVertical = true
+            collectionView.showsHorizontalScrollIndicator = true
+            collectionView.showsVerticalScrollIndicator = true
+        case .horizontal:
+            collectionView.alwaysBounceHorizontal = true
+            collectionView.alwaysBounceVertical = false
+            collectionView.showsHorizontalScrollIndicator = true
+            collectionView.showsVerticalScrollIndicator = false
+        case .vertical:
+            collectionView.alwaysBounceHorizontal = false
+            collectionView.alwaysBounceVertical = true
+            collectionView.showsHorizontalScrollIndicator = false
+            collectionView.showsVerticalScrollIndicator = true
+        }
+    }
+
+    private func makeSection() -> NSCollectionLayoutSection? {
+        guard gridRowCount > 0, columnCount > 0 else { return nil }
+        let sep = configuration.separator.width
+        let start = gridRowOffset
+
+        // 每一行是一个横向 group，group 内每个 item 用「绝对列宽 × 绝对行高」。
+        var rowGroups: [NSCollectionLayoutItem] = []
+        for r in start..<rowCount {
+            let rowHeight = rowHeights[r]
+            var items: [NSCollectionLayoutItem] = []
+            for c in 0..<columnCount {
+                let size = NSCollectionLayoutSize(widthDimension: .absolute(max(columnWidths[c], 1)),
+                                                  heightDimension: .absolute(max(rowHeight, 1)))
+                items.append(NSCollectionLayoutItem(layoutSize: size))
+            }
+            let totalWidth = columnWidths.reduce(0, +) + sep * CGFloat(max(columnCount - 1, 0))
+            let rowSize = NSCollectionLayoutSize(widthDimension: .absolute(max(totalWidth, 1)),
+                                                 heightDimension: .absolute(max(rowHeight, 1)))
+            let rowGroup = NSCollectionLayoutGroup.horizontal(layoutSize: rowSize, subitems: items)
+            rowGroup.interItemSpacing = .fixed(sep)
+            rowGroups.append(rowGroup)
+        }
+
+        let totalWidth = columnWidths.reduce(0, +) + sep * CGFloat(max(columnCount - 1, 0))
+        let gridHeights = rowHeights[start...]
+        let totalHeight = gridHeights.reduce(0, +) + sep * CGFloat(max(gridRowCount - 1, 0))
+        let containerSize = NSCollectionLayoutSize(widthDimension: .absolute(max(totalWidth, 1)),
+                                                   heightDimension: .absolute(max(totalHeight, 1)))
+        let outer = NSCollectionLayoutGroup.vertical(layoutSize: containerSize, subitems: rowGroups)
+        outer.interItemSpacing = .fixed(sep)
+
+        return NSCollectionLayoutSection(group: outer)
+    }
+
+    /// 构建吸顶表头（把第 0 行单独渲染到 headerScroll 内）。
+    private func buildStickyHeader() {
+        headerContent.subviews.forEach { $0.removeFromSuperview() }
+
+        guard gridRowOffset == 1, columnCount > 0 else {
+            // 不吸顶：隐藏表头容器。
+            headerHeightConstraint.constant = 0
+            collectionTopConstraint.constant = 0
+            headerScroll.isHidden = true
+            return
+        }
+
+        headerScroll.isHidden = false
+        let sep = configuration.separator.width
+        let h = rowHeights[0]
+        headerScroll.backgroundColor = configuration.separator.color
+        headerContent.backgroundColor = configuration.separator.color
+
+        var x: CGFloat = 0
+        for c in 0..<columnCount {
+            let w = columnWidths[c]
+            let style = effectiveStyle(row: 0, column: c)
+            let cellView = makeHeaderCellView(model: model(row: 0, column: c), style: style,
+                                              frame: CGRect(x: x, y: 0, width: w, height: h))
+            headerContent.addSubview(cellView)
+            x += w + sep
+        }
+
+        let totalWidth = columnWidths.reduce(0, +) + sep * CGFloat(max(columnCount - 1, 0))
+        headerContent.frame = CGRect(x: 0, y: 0, width: totalWidth, height: h)
+        headerScroll.contentSize = CGSize(width: totalWidth, height: h)
+        headerHeightConstraint.constant = h
+        collectionTopConstraint.constant = sep   // 表头与首行之间留一条分割线
+        headerScroll.contentOffset = CGPoint(x: collectionView.contentOffset.x, y: 0)
+    }
+
+    /// 生成一个吸顶表头单元格视图。
+    private func makeHeaderCellView(model: GridCellModel?, style: GridCellStyle, frame: CGRect) -> UIView {
+        let container = UIView(frame: frame)
+        container.backgroundColor = style.backgroundColor
+        let insets = style.contentInsets
+
+        if let provider = model?.customView {
+            let v = provider()
+            v.frame = CGRect(x: insets.left, y: insets.top,
+                             width: frame.width - insets.left - insets.right,
+                             height: frame.height - insets.top - insets.bottom)
+            container.addSubview(v)
+            return container
+        }
+
+        let label = UILabel(frame: CGRect(x: insets.left, y: insets.top,
+                                          width: frame.width - insets.left - insets.right,
+                                          height: frame.height - insets.top - insets.bottom))
+        label.numberOfLines = style.numberOfLines
+        label.textAlignment = style.textAlignment
+        if let attributed = model?.attributedText {
+            label.attributedText = attributed
+        } else {
+            label.text = model?.text
+            label.font = style.font
+            label.textColor = style.textColor
+        }
+        container.addSubview(label)
+        return container
+    }
+
+    /// 应用外边框与「用背景色模拟分割线」。
+    private func applyBorderAndSeparatorColor() {
+        // 分割线：单元格之间留 `separator.width` 的间隙，露出背景色即为分割线颜色。
+        collectionView.backgroundColor = configuration.separator.color
+        backgroundColor = configuration.separator.color
+
+        // 外边框 + 圆角（作用在整个表格容器上，裁剪四角）。
+        let border = configuration.border
+        layer.borderWidth = border.width
+        layer.borderColor = border.color.cgColor
+        layer.cornerRadius = border.cornerRadius
+        layer.masksToBounds = true
+
+        // 容器已负责边框圆角，集合视图自身不再重复。
+        collectionView.layer.borderWidth = 0
+        collectionView.layer.cornerRadius = 0
+    }
+
+    // MARK: 尺寸自适应
+
+    /// 表格内容总尺寸（含分割线间隙）。可用于外部约束高度 / 宽度。
+    public var contentSize: CGSize {
+        let sep = configuration.separator.width
+        let w = columnWidths.reduce(0, +) + sep * CGFloat(max(columnCount - 1, 0))
+        let h = rowHeights.reduce(0, +) + sep * CGFloat(max(rowCount - 1, 0))
+        return CGSize(width: w, height: h)
+    }
+
+    public override var intrinsicContentSize: CGSize {
+        contentSize
+    }
+
+    // MARK: - UICollectionViewDataSource
+
+    public func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int {
+        gridRowCount * columnCount
+    }
+
+    public func collectionView(_ collectionView: UICollectionView,
+                               cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
+        let cell = collectionView.dequeueReusableCell(withReuseIdentifier: GridTextCell.reuseID,
+                                                      for: indexPath) as! GridTextCell
+        let (r, c) = position(for: indexPath.item)
+        if let m = model(row: r, column: c) {
+            cell.configure(model: m, style: effectiveStyle(row: r, column: c))
+        }
+        return cell
+    }
+
+    /// 线性 item 下标 → (行, 列)。行主序，与布局分组顺序一致；吸顶时需加上偏移。
+    private func position(for item: Int) -> (row: Int, column: Int) {
+        guard columnCount > 0 else { return (0, 0) }
+        return (item / columnCount + gridRowOffset, item % columnCount)
+    }
+}
+
+// MARK: - UICollectionViewDelegate
+
+@available(iOS 13.0, *)
+extension GridTableView: UICollectionViewDelegate {
+
+    public func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
+        let (r, c) = position(for: indexPath.item)
+        guard let m = model(row: r, column: c) else { return }
+        onSelectCell?(r, c, m)
+    }
+
+    /// 横向滚动时，让吸顶表头与内容保持列对齐；单方向模式下锁定另一轴。
+    public func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        guard scrollView == collectionView else { return }
+
+        // 单方向锁定：把被锁定轴的偏移强制归零。
+        switch configuration.scrollMode {
+        case .vertical:
+            if collectionView.contentOffset.x != 0 {
+                collectionView.contentOffset.x = 0
+            }
+        case .horizontal:
+            if collectionView.contentOffset.y != 0 {
+                collectionView.contentOffset.y = 0
+            }
+        case .both:
+            break
+        }
+
+        // 吸顶表头与内容横向对齐。
+        if !headerScroll.isHidden {
+            headerScroll.contentOffset = CGPoint(x: collectionView.contentOffset.x, y: 0)
+        }
+    }
+}
+
+// MARK: - 支持双向滑动的 Compositional Layout
+
+/// Compositional Layout 默认围绕主轴（这里是纵向）计算可见区域，
+/// 斜向 / 快速双向滑动时横向新进入可见区的 cell 不会被重新准备，导致空白。
+/// 重写 `shouldInvalidateLayout(forBoundsChange:)`，让任意方向的偏移变化都触发
+/// 重新计算可见属性，从而修复漏 cell 的问题。
+@available(iOS 13.0, *)
+final class GridCompositionalLayout: UICollectionViewCompositionalLayout {
+    override func shouldInvalidateLayout(forBoundsChange newBounds: CGRect) -> Bool {
+        return true
+    }
+}

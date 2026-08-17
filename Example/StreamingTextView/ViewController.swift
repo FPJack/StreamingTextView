@@ -72,6 +72,7 @@ class ViewController: UIViewController, @MainActor StreamingTextViewDelegate {
         let sizeButton = button(title: "Pre-calc Size", action: #selector(onOpenSizeCalc))
         let offsetButton = button(title: "Start From Offset", action: #selector(onStartFromOffset))
         let tableButton = button(title: "TableView Streaming", action: #selector(onOpenTableStream))
+        let gridButton = button(title: "Grid Table (Compositional)", action: #selector(onOpenGridTable))
 
         let row1 = UIStackView(arrangedSubviews: [plainButton, richButton, streamButton])
         row1.axis = .horizontal
@@ -83,7 +84,7 @@ class ViewController: UIViewController, @MainActor StreamingTextViewDelegate {
         row2.distribution = .fillEqually
         row2.spacing = 12
 
-        let stack = UIStackView(arrangedSubviews: [row1, row2, chatButton, sizeButton, offsetButton, tableButton])
+        let stack = UIStackView(arrangedSubviews: [row1, row2, chatButton, sizeButton, offsetButton, tableButton, gridButton])
         stack.axis = .vertical
         stack.spacing = 12
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -201,6 +202,19 @@ class ViewController: UIViewController, @MainActor StreamingTextViewDelegate {
             let nav = UINavigationController(rootViewController: vc)
             nav.modalPresentationStyle = .fullScreen
             present(nav, animated: true)
+        }
+    }
+
+    @objc private func onOpenGridTable() {
+        if #available(iOS 13.0, *) {
+            let vc = GridTableViewController()
+            if let nav = navigationController {
+                nav.pushViewController(vc, animated: true)
+            } else {
+                let nav = UINavigationController(rootViewController: vc)
+                nav.modalPresentationStyle = .fullScreen
+                present(nav, animated: true)
+            }
         }
     }
 
