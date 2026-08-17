@@ -1,9 +1,10 @@
 //
-//  TextViewGestureManager.swift
+//  TextTapGesture.swift
 //  StreamingTextView_Example
 //
 //  统一管理 UITextView 的手势交互：图片点击 + 链接点击。
-//  内部负责添加手势、判断命中类型，并通过 block 把事件回调给外部；
+//  本类直接继承 UITapGestureRecognizer——textView 会强引用自己的手势，
+//  因此 manager 的生命周期天然随手势挂在 textView 上，无需关联对象或外部属性持有。
 //  只有点到「图片」或「链接」时才接收触摸，否则放行给 UITextView 处理
 //  自身的文本选择等手势，不会拦截原生交互。
 //
@@ -11,7 +12,10 @@
 import UIKit
 
 @MainActor
-public class TextViewGestureManager: NSObject, UIGestureRecognizerDelegate {
+public class TextTapGesture: UITapGestureRecognizer, UIGestureRecognizerDelegate {
+
+    /// 手势名字标记：用于在 textView 上识别 / 移除本类添加的手势，避免重复叠加。
+    public static let gestureName = "com.streamingtextview.TextTapGesture"
 
     /// 点击到图片附件时回调。
     /// - 参数 1：被点击的图片附件。
@@ -22,24 +26,24 @@ public class TextViewGestureManager: NSObject, UIGestureRecognizerDelegate {
     public var onLinkTapped: ((URL) -> Void)?
 
     /// 被管理的 textView（弱引用，避免循环持有）。
-    private weak var textView: UITextView?
+    private weak var boundTextView: UITextView?
 
-    /// 绑定到指定 textView，并自动添加点击手势。
+    /// 绑定到指定 textView，并自动把自己作为点击手势添加上去。
     /// - Parameter textView: 承载富文本（图片附件 / 链接）的 UITextView。
     public init(textView: UITextView) {
-        self.textView = textView
-        super.init()
-
-        let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
-        tap.delegate = self
-        textView.addGestureRecognizer(tap)
+        super.init(target: nil, action: nil)
+        self.boundTextView = textView
+        self.addTarget(self, action: #selector(handleTap))
+        self.delegate = self
+        self.name = TextTapGesture.gestureName
+        textView.addGestureRecognizer(self)
     }
 
     // MARK: - Tap handling
 
-    @objc private func handleTap(_ gesture: UITapGestureRecognizer) {
-        guard let textView = textView else { return }
-        let point = gesture.location(in: textView)
+    @objc private func handleTap() {
+        guard let textView = boundTextView else { return }
+        let point = location(in: textView)
 
         // 优先命中图片附件。
         if let attachment = DownBridge.imageAttachment(at: point, in: textView) {
@@ -84,7 +88,7 @@ public class TextViewGestureManager: NSObject, UIGestureRecognizerDelegate {
 
     /// 只有触点落在图片或链接上时才接收触摸，否则放行给 textView 自身手势。
     public func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
-        guard let textView = textView else { return false }
+        guard let textView = boundTextView else { return false }
         let point = touch.location(in: textView)
         if DownBridge.imageAttachment(at: point, in: textView) != nil { return true }
         return link(at: point, in: textView) != nil
@@ -96,3 +100,4 @@ public class TextViewGestureManager: NSObject, UIGestureRecognizerDelegate {
         return true
     }
 }
+

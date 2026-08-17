@@ -140,8 +140,17 @@ public class MarkdownRenderOptions: NSObject {
     /// 单张图片下载完成后的回调，参数为其在富文本中的 range。
     public var onImageLoaded: ((ImageTextAttachment) -> Void)?
 
-    /// 图片点击事件回调，参数为被点击的图片附件。
-    public var onImageTapped: ((ImageTextAttachment) -> Void)?
+    /// 图片点击事件回调。
+    /// - 参数 1：被点击的图片附件。
+    /// - 参数 2：所在 textView 里按顺序排列的全部图片附件（用于多图左右滑动浏览）。
+    public var onImageTapped: ((ImageTextAttachment, [ImageTextAttachment]) -> Void)?
+
+    /// 链接点击事件回调（参数为链接 URL）。
+    public var onLinkTapped: ((URL) -> Void)?
+
+    /// 承载富文本的 textView。设置后，`attributedString(fromMarkdown:options:)`
+    /// 会自动为其绑定手势交互（图片点击 + 链接跳转），无需外部再手动调用 `bindGestures(to:)`。
+    public weak var textView: UITextView?
 
     public override init() {
         super.init()
@@ -157,6 +166,32 @@ public class MarkdownRenderOptions: NSObject {
         self.textColor = textColor
         self.maxImageWidth = maxImageWidth
         self.onImageLoaded = onImageLoaded
+    }
+
+    /// 给指定 textView 绑定手势交互（图片点击 + 链接跳转）：
+    /// 内部会**自动判断是否需要绑定**——只有设置了 `onImageTapped` 或 `onLinkTapped`
+    /// 才创建 `TextTapGesture` 并赋值回调；两者都为空则不绑定，返回 nil。
+    ///
+    /// 绑定前会先移除 textView 上由本类添加过的旧手势，避免重复叠加；
+    /// 新建的 manager 由「textView → 手势 → manager」这条引用链天然持有，
+    /// 外部无需额外保存（无需关联对象）。
+    /// - Parameter textView: 承载富文本（图片附件 / 链接）的 UITextView。
+    /// - Returns: 绑定好的手势管理器；无需绑定时返回 nil。
+    @MainActor
+    @discardableResult
+    public func bindGestures(to textView: UITextView) -> TextTapGesture? {
+        // 先移除旧的同名手势（连带释放其持有的旧 manager），避免重复绑定。
+        textView.gestureRecognizers?
+            .filter { $0.name == TextTapGesture.gestureName }
+            .forEach { textView.removeGestureRecognizer($0) }
+
+        // 自动判断：没有任何点击回调时无需绑定。
+        guard onImageTapped != nil || onLinkTapped != nil else { return nil }
+
+        let manager = TextTapGesture(textView: textView)
+        manager.onImageTapped = onImageTapped
+        manager.onLinkTapped = onLinkTapped
+        return manager
     }
 }
 
@@ -188,6 +223,7 @@ public class DownBridge: NSObject {
     /// - Parameters:
     ///   - markdown: Markdown 源码。
     ///   - options: 渲染配置（字号、颜色、图片最大宽度、图片下载回调等）。
+    @MainActor
     public static func attributedString(fromMarkdown markdown: String,
                                         options: MarkdownRenderOptions) -> NSAttributedString? {
         let fontSize = options.fontSize
@@ -250,10 +286,15 @@ public class DownBridge: NSObject {
             let parsed = try Down(markdownString: markdown)
                 .toAttributedString(.normalize, styler: ImageStyler(configuration: configuration))
             // 直接在这里完成图片下载：把占位附件替换为会自下载的 `ImageTextAttachment` 并触发下载。
-            return processImages(in: parsed,
-                                 maxImageWidth: options.maxImageWidth,
-                                 onImageLoaded: options.onImageLoaded,
-                                 onImageTapped: options.onImageTapped)
+            // 图片点击 / 链接跳转由 `MarkdownRenderOptions.bindGestures(to:)` 统一处理。
+            let result = processImages(in: parsed,
+                                       maxImageWidth: options.maxImageWidth,
+                                       onImageLoaded: options.onImageLoaded)
+            // 若设置了 textView，则自动绑定手势（内部会按需判断是否真的需要绑定）。
+            if let textView = options.textView {
+                options.bindGestures(to: textView)
+            }
+            return result
         } catch {
             print("Error converting markdown: \(error)")
             return nil

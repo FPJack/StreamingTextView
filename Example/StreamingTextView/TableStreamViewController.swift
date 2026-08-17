@@ -38,7 +38,7 @@ private class StreamCell: UITableViewCell {
     var onLinkTapped: ((URL) -> Void)?
 
     /// textView 手势管理（图片点击 + 链接跳转）。
-    private var gestureManager: TextViewGestureManager?
+    private var gestureManager: TextTapGesture?
 
     override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
         super.init(style: style, reuseIdentifier: reuseIdentifier)
@@ -55,7 +55,7 @@ private class StreamCell: UITableViewCell {
         contentView.addSubview(streamingView)
 
         // 用手势管理类统一处理图片点击 + 链接跳转（内部自行添加手势，不拦截 textView 原生交互）。
-        gestureManager = TextViewGestureManager(textView: streamingView.textView)
+        gestureManager = TextTapGesture(textView: streamingView.textView)
         gestureManager?.onImageTapped = { [weak self] tapped, allImages in
             self?.onImageTapped?(tapped, allImages)
         }

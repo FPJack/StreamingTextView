@@ -16,8 +16,6 @@ class ChatViewController: UIViewController,  @MainActor StreamingTextViewDelegat
     private var assistantBubble: UIView!
     private let typingLabel = UILabel()
     private var streamingView: StreamingTextView!
-    /// textView 手势管理（图片点击 + 链接跳转）。
-    private var gestureManager: TextViewGestureManager?
     /// 外部可设置：富文本内有多张图片时，预览是否支持左右滑动浏览。
     var allowsImageSwipe = true
 
@@ -88,28 +86,8 @@ class ChatViewController: UIViewController,  @MainActor StreamingTextViewDelegat
         streamingView.textView.isScrollEnabled = false
         streamingView.textView.textContainerInset = .zero
         streamingView.textView.textContainer.lineFragmentPadding = 0
-        // 用手势管理类统一处理图片点击 + 链接跳转（内部自行添加手势，不拦截 textView 原生交互）。
-        gestureManager = TextViewGestureManager(textView: streamingView.textView)
-        gestureManager?.onImageTapped = { [weak self] tapped, allImages in
-            guard let self = self else { return }
-            // 收集已下载完成的图片，并计算被点图片在其中的下标。
-            var images: [UIImage] = []
-            var startIndex = 0
-            for att in allImages {
-                if let img = att.image {
-                    if att === tapped { startIndex = images.count }
-                    images.append(img)
-                }
-            }
-            guard !images.isEmpty else { return }
-            ImagePreviewer.shared.present(images,
-                                          startIndex: startIndex,
-                                          from: self.view,
-                                          allowsSwipe: self.allowsImageSwipe)
-        }
-        gestureManager?.onLinkTapped = { url in
-            UIApplication.shared.open(url)
-        }
+        // 图片点击 + 链接跳转统一交由 MarkdownRenderOptions.bindGestures(to:) 处理，
+        // 在 startStreaming() 里完成绑定（内部创建并持有 TextTapGesture）。
         assistantBubble.addSubview(streamingView)
         contentView.addSubview(assistantBubble)
 
@@ -205,6 +183,30 @@ class ChatViewController: UIViewController,  @MainActor StreamingTextViewDelegat
             }
             self.refreshImage(at: attach.range)
         }
+        // 图片点击：收集已下载完成的图片，计算被点图片下标，进入预览（支持多图左右滑动）。
+        options.onImageTapped = { [weak self] tapped, allImages in
+            guard let self = self else { return }
+            var images: [UIImage] = []
+            var startIndex = 0
+            for att in allImages {
+                if let img = att.image {
+                    if att === tapped { startIndex = images.count }
+                    images.append(img)
+                }
+            }
+            guard !images.isEmpty else { return }
+            ImagePreviewer.shared.present(images,
+                                          startIndex: startIndex,
+                                          from: self.view,
+                                          allowsSwipe: self.allowsImageSwipe)
+        }
+        // 链接点击：打开 URL。
+        options.onLinkTapped = { url in
+            UIApplication.shared.open(url)
+        }
+        // 指定承载文本的 textView，attributedString(...) 内部会自动完成手势绑定。
+        options.textView = streamingView.textView
+
         guard let rich = DownBridge.attributedString(fromMarkdown: markdown, options: options),
               rich.length > 0 else {
             typingLabel.text = "解析失败"
@@ -231,7 +233,7 @@ class ChatViewController: UIViewController,  @MainActor StreamingTextViewDelegat
 
     // MARK: - Image tap
 
-    // 图片点击与链接跳转已统一交由 TextViewGestureManager 处理，
+    // 图片点击与链接跳转已统一交由 TextTapGesture 处理，
     // 图片预览由 ImagePreviewer 负责，见 setupUI() 中的回调设置。
 
     // MARK: - StreamingTextViewDelegate
