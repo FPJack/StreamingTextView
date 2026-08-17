@@ -357,7 +357,7 @@ public class DownBridge: NSObject {
         var header = GridCellStyle()
         header.font = .boldSystemFont(ofSize: fontSize - 1)
         header.textColor = .white
-        header.backgroundColor = UIColor(red: 0.0, green: 0.48, blue: 1.0, alpha: 1)
+        header.backgroundColor = .red
         header.textAlignment = .center
         config.headerStyle = header
 

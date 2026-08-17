@@ -1,4 +1,20 @@
 
+| Swift Version | Tag | Xcode Version | iOS Deployment Target | Notes |
+| --- | --- | --- | --- | --- |
+| Swift 5.1 | >= 0.9.0 | Xcode 11+ | iOS 8+ | Supports Swift 5.1 features |
+| Swift 5.0 | >= 0.8.1 | Xcode 10+ | iOS 8+ | Swift ABI Stable |
+| Swift 4.x | >= 0.4.x | Xcode 9+ | iOS 8+ | Legacy Swift 4 support |
+| Swift 3.x | 0.3.x | Xcode 8+ | iOS 8+ | Deprecated support |
+| Swift 5.1 | >= 0.9.0 | Xcode 11+ | iOS 8+ | Supports Swift 5.1 features |
+| Swift 5.0 | >= 0.8.1 | Xcode 10+ | iOS 8+ | Swift ABI Stable |
+| Swift 4.x | >= 0.4.x | Xcode 9+ | iOS 8+ | Legacy Swift 4 support |
+| Swift 3.x | 0.3.x | Xcode 8+ | iOS 8+ | Deprecated support |
+| Swift 5.1 | >= 0.9.0 | Xcode 11+ | iOS 8+ | Supports Swift 5.1 features |
+| Swift 5.0 | >= 0.8.1 | Xcode 10+ | iOS 8+ | Swift ABI Stable |
+| Swift 4.x | >= 0.4.x | Xcode 9+ | iOS 8+ | Legacy Swift 4 support |
+| Swift 3.x | 0.3.x | Xcode 8+ | iOS 8+ | Deprecated support |
+
+
 ```swift
 public struct MarkdownToHTML: DownHTMLRenderable {
   

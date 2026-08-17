@@ -28,12 +28,16 @@ public protocol StreamingBlockAttachment: AnyObject {
     /// 附件被揭示时调用：在 `hostView` 上按 `frame` 放置自己的视图并开始动画。
     /// - Parameters:
     ///   - hostView: 承载覆盖视图的父视图（通常是 textView 本身）。
-    ///   - frame: 附件在 `hostView` 坐标系里的矩形（= 附件预留尺寸）。
+    ///   - frame: 附件在 `hostView` 坐标系里的矩形（= 附件当前预留尺寸）。
     ///   - animated: 是否播放动画（`false` 表示一次性直接显示，如关闭流式 / 立即完成时）。
+    ///   - onLayoutChange: 当附件自身尺寸变化（如表格逐行增高）时调用，
+    ///     宿主据此重新排版文本，使 textView 高度与附件同步增长。
     ///   - completion: 动画结束回调；文字流式会在此之后继续。
-    func beginStreaming(in hostView: UIView, frame: CGRect, animated: Bool, completion: @escaping () -> Void)
+    func beginStreaming(in hostView: UIView, frame: CGRect, animated: Bool,
+                        onLayoutChange: @escaping () -> Void,
+                        completion: @escaping () -> Void)
 
-    /// 布局变化时重新定位覆盖视图（尺寸保持附件预留尺寸，避免回流）。
+    /// 布局变化时重新定位覆盖视图（尺寸取附件当前预留尺寸）。
     func updateFrame(_ frame: CGRect, in hostView: UIView)
 
     /// 从视图层级移除覆盖视图（reset / 复用时调用）。
@@ -425,14 +429,30 @@ public class StreamingTextView: UIView {
     private func startBlock(_ block: (loc: Int, att: StreamingBlockAttachment), pausingStream: Bool) {
         startedBlocks.append(block)
         let rect = rectForAttachment(at: block.loc)
+        let onLayoutChange: () -> Void = { [weak self] in
+            self?.invalidateBlockLayout(at: block.loc)
+        }
         if pausingStream && isStreamingEnabled {
             stopDisplayLink()   // 暂停文字（isStreaming 仍为 true）
-            block.att.beginStreaming(in: textView, frame: rect, animated: true) { [weak self] in
+            block.att.beginStreaming(in: textView, frame: rect, animated: true,
+                                     onLayoutChange: onLayoutChange) { [weak self] in
                 self?.resumeAfterBlock()
             }
         } else {
-            block.att.beginStreaming(in: textView, frame: rect, animated: false) {}
+            block.att.beginStreaming(in: textView, frame: rect, animated: false,
+                                     onLayoutChange: onLayoutChange) {}
         }
+    }
+
+    /// 块级附件自身尺寸变化后，重新排版其占位区域，使 textView 高度与之同步增长。
+    private func invalidateBlockLayout(at loc: Int) {
+        guard loc < textView.textStorage.length else { return }
+        let range = NSRange(location: loc, length: 1)
+        let lm = textView.layoutManager
+        lm.invalidateLayout(forCharacterRange: range, actualCharacterRange: nil)
+        lm.ensureLayout(for: textView.textContainer)
+        repositionBlocks()
+        notifyContentSizeChangeIfNeeded()
     }
 
     /// 块级附件动画完成后，继续文字流式（或收尾）。

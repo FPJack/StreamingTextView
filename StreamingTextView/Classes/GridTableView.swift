@@ -334,6 +334,7 @@ public class GridTableView: UIView, UICollectionViewDataSource {
         cv.register(GridTextCell.self, forCellWithReuseIdentifier: GridTextCell.reuseID)
         cv.alwaysBounceVertical = false
         cv.alwaysBounceHorizontal = false
+        cv.bounces = false   // 关闭滑动到边界时的弹性效果
         return cv
     }()
 
@@ -717,20 +718,18 @@ public class GridTableView: UIView, UICollectionViewDataSource {
 
     /// 按滑动模式设置集合视图的滚动 / 回弹 / 指示器行为。
     private func applyScrollMode() {
+        // 关闭边界弹性（水平 + 垂直）。
+        collectionView.bounces = false
+        collectionView.alwaysBounceHorizontal = false
+        collectionView.alwaysBounceVertical = false
         switch configuration.scrollMode {
         case .both:
-            collectionView.alwaysBounceHorizontal = true
-            collectionView.alwaysBounceVertical = true
             collectionView.showsHorizontalScrollIndicator = true
             collectionView.showsVerticalScrollIndicator = true
         case .horizontal:
-            collectionView.alwaysBounceHorizontal = true
-            collectionView.alwaysBounceVertical = false
             collectionView.showsHorizontalScrollIndicator = true
             collectionView.showsVerticalScrollIndicator = false
         case .vertical:
-            collectionView.alwaysBounceHorizontal = false
-            collectionView.alwaysBounceVertical = true
             collectionView.showsHorizontalScrollIndicator = false
             collectionView.showsVerticalScrollIndicator = true
         }
@@ -844,7 +843,7 @@ public class GridTableView: UIView, UICollectionViewDataSource {
     private func applyBorderAndSeparatorColor() {
         // 分割线：单元格之间留 `separator.width` 的间隙，露出背景色即为分割线颜色。
         collectionView.backgroundColor = configuration.separator.color
-        backgroundColor = configuration.separator.color
+        backgroundColor = .white
 
         // 外边框 + 圆角（作用在整个表格容器上，裁剪四角）。
         let border = configuration.border
