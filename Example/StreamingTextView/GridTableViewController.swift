@@ -31,6 +31,10 @@ class GridTableViewController: UIViewController {
         gridTable.onSelectCell = { row, col, model in
             print("点击了 (\(row), \(col)) = \(model.text ?? "")")
         }
+        // 流式打印 / 缩放 / 布局变化时，表格自适应宽高变化的回调。
+        gridTable.onContentSizeChanged = { size in
+            print("表格尺寸变化：\(size)")
+        }
         // 表格头部工具条（固定，用于复制 / 导出等操作）。
         gridTable.setTableHeaderView(makeToolbar(), height: 44)
         // 表格尾部统计视图（固定）。
@@ -218,7 +222,12 @@ class GridTableViewController: UIViewController {
         fillButton.titleLabel?.font = .systemFont(ofSize: 14)
         fillButton.addTarget(self, action: #selector(onToggleFill(_:)), for: .touchUpInside)
 
-        let stack = UIStackView(arrangedSubviews: [titleLabel, UIView(), fillButton, copyButton, exportButton])
+        let streamButton = UIButton(type: .system)
+        streamButton.setTitle("流式", for: .normal)
+        streamButton.titleLabel?.font = .systemFont(ofSize: 14)
+        streamButton.addTarget(self, action: #selector(onStreamRows), for: .touchUpInside)
+
+        let stack = UIStackView(arrangedSubviews: [titleLabel, UIView(), streamButton, fillButton, copyButton, exportButton])
         stack.axis = .horizontal
         stack.spacing = 16
         stack.alignment = .center
@@ -262,5 +271,11 @@ class GridTableViewController: UIViewController {
         stretchToFill.toggle()
         sender.setTitle(stretchToFill ? "填充:开" : "填充:关", for: .normal)
         applyData()
+    }
+
+    /// 逐行流式打印表格。
+    @objc private func onStreamRows() {
+        gridTable.onRowStreamingFinished = { print("表格流式打印完成 ✅") }
+        gridTable.startRowStreaming(rowInterval: 0.12, animated: true)
     }
 }

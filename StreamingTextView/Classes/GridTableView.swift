@@ -273,6 +273,13 @@ public class GridTableView: UIView, UICollectionViewDataSource {
     /// 单元格点击回调（行、列、模型）。
     public var onSelectCell: ((_ row: Int, _ column: Int, _ model: GridCellModel) -> Void)?
 
+    /// 表格自适应尺寸（`intrinsicContentSize`）发生变化时的回调。
+    /// 常用于流式打印过程中随行数增长实时拿到新的宽高，外部据此更新约束 / 布局。
+    public var onContentSizeChanged: ((CGSize) -> Void)?
+
+    /// 上次已通知的尺寸，用于去重（仅在变化时回调）。
+    private var lastNotifiedSize: CGSize = .zero
+
     /// 设置数据并刷新。
     /// - Parameters:
     ///   - rows: 二维单元格数据。
@@ -280,6 +287,10 @@ public class GridTableView: UIView, UICollectionViewDataSource {
     public func setRows(_ rows: [[GridCellModel]], configuration: GridTableConfiguration? = nil) {
         if let configuration = configuration { self.configuration = configuration }
         self.rows = rows
+        // 重置逐行流式状态（如需流式，调用 startRowStreaming）。
+        stopRowStreamingTimer()
+        isStreamingRows = false
+        streamedRowLimit = rows.count
         reload()
     }
 
@@ -295,6 +306,7 @@ public class GridTableView: UIView, UICollectionViewDataSource {
         collectionView.reloadData()
         invalidateIntrinsicContentSize()
         lastLaidOutSize = collectionView.bounds.size
+        notifyContentSizeChangeIfNeeded()
     }
 
     public override func layoutSubviews() {
@@ -309,12 +321,14 @@ public class GridTableView: UIView, UICollectionViewDataSource {
         buildStickyHeader()
         collectionView.setCollectionViewLayout(makeLayout(), animated: false)
         invalidateIntrinsicContentSize()
+        notifyContentSizeChangeIfNeeded()
     }
 
     // MARK: 私有状态
 
     private lazy var collectionView: UICollectionView = {
         let cv = UICollectionView(frame: bounds, collectionViewLayout: UICollectionViewFlowLayout())
+        cv.backgroundColor = .white
         cv.dataSource = self
         cv.delegate = self
         cv.register(GridTextCell.self, forCellWithReuseIdentifier: GridTextCell.reuseID)
@@ -347,12 +361,28 @@ public class GridTableView: UIView, UICollectionViewDataSource {
     private var zoomScale: CGFloat = 1
     private weak var pinchGesture: UIPinchGestureRecognizer?
 
+    /// 逐行流式打印状态。
+    private var isStreamingRows = false
+    /// 当前已揭示的行数（含表头行）。
+    private var streamedRowLimit = 0
+    private var streamTimer: Timer?
+    private var streamRowInterval: TimeInterval = 0.15
+    private var streamAnimated = true
+    /// 全部行揭示完成回调。
+    public var onRowStreamingFinished: (() -> Void)?
+
+    /// 当前实际参与渲染的行数（流式时受 `streamedRowLimit` 限制）。
+    private var effectiveRowCount: Int {
+        guard isStreamingRows else { return rowCount }
+        return min(max(streamedRowLimit, 0), rowCount)
+    }
+
     /// 吸顶生效时，网格渲染从第 1 行开始（第 0 行由吸顶表头单独渲染）。
     private var gridRowOffset: Int {
         (configuration.stickyHeader && configuration.hasHeaderRow && rowCount > 0) ? 1 : 0
     }
-    /// 参与网格渲染的行数。
-    private var gridRowCount: Int { max(rowCount - gridRowOffset, 0) }
+    /// 参与网格渲染的行数（流式时受 `effectiveRowCount` 限制）。
+    private var gridRowCount: Int { max(effectiveRowCount - gridRowOffset, 0) }
 
     private var headerHeightConstraint: NSLayoutConstraint!
     private var collectionTopConstraint: NSLayoutConstraint!
@@ -376,6 +406,10 @@ public class GridTableView: UIView, UICollectionViewDataSource {
     public required init?(coder: NSCoder) {
         super.init(coder: coder)
         setup()
+    }
+
+    deinit {
+        streamTimer?.invalidate()
     }
 
     private func setup() {
@@ -577,6 +611,7 @@ public class GridTableView: UIView, UICollectionViewDataSource {
             collectionView.setCollectionViewLayout(makeLayout(), animated: false)
             collectionView.reloadData()
             invalidateIntrinsicContentSize()
+            notifyContentSizeChangeIfNeeded()
         default:
             break
         }
@@ -585,6 +620,85 @@ public class GridTableView: UIView, UICollectionViewDataSource {
     /// 测量单元格内容尺寸（含内边距）。
     private func measure(_ model: GridCellModel, style: GridCellStyle, maxWidth: CGFloat) -> CGSize {
         GridTableView.measureCell(model, style: style, maxWidth: maxWidth)
+    }
+
+    // MARK: 逐行流式打印
+
+    /// 开始逐行流式打印表格：按行依次揭示（每行淡入 + 表格高度动态增长）。
+    /// 需在 `setRows(_:configuration:)` 之后调用。
+    /// - Parameters:
+    ///   - rowInterval: 每行出现的时间间隔（秒）。
+    ///   - animated: 是否使用插入淡入 / 高度增长动画。
+    public func startRowStreaming(rowInterval: TimeInterval = 0.15, animated: Bool = true) {
+        stopRowStreamingTimer()
+        guard rowCount > 0 else { return }
+        isStreamingRows = true
+        streamRowInterval = max(rowInterval, 0.01)
+        streamAnimated = animated
+        // 表头行（若有）先显示；否则从 0 行开始。
+        streamedRowLimit = configuration.hasHeaderRow ? min(1, rowCount) : 0
+        reload()
+
+        if streamedRowLimit >= rowCount {
+            finishRowStreaming()
+            return
+        }
+        streamTimer = Timer.scheduledTimer(withTimeInterval: streamRowInterval, repeats: true) { [weak self] _ in
+            self?.revealNextRow()
+        }
+    }
+
+    /// 立即结束流式，揭示全部行。
+    public func stopRowStreaming() {
+        guard isStreamingRows else { return }
+        stopRowStreamingTimer()
+        streamedRowLimit = rowCount
+        reload()
+        finishRowStreaming()
+    }
+
+    private func stopRowStreamingTimer() {
+        streamTimer?.invalidate()
+        streamTimer = nil
+    }
+
+    private func finishRowStreaming() {
+        isStreamingRows = false
+        onRowStreamingFinished?()
+    }
+
+    /// 揭示下一行（带插入动画）。
+    private func revealNextRow() {
+        guard streamedRowLimit < rowCount else {
+            stopRowStreamingTimer()
+            finishRowStreaming()
+            return
+        }
+        let oldItemCount = gridRowCount * columnCount
+        streamedRowLimit += 1
+        let newItemCount = gridRowCount * columnCount
+        guard newItemCount > oldItemCount else { return }
+
+        let indexPaths = (oldItemCount..<newItemCount).map { IndexPath(item: $0, section: 0) }
+
+        if streamAnimated {
+            collectionView.performBatchUpdates({
+                collectionView.insertItems(at: indexPaths)
+            }, completion: nil)
+            // 表格整体高度随之增长（动画）。
+            invalidateIntrinsicContentSize()
+            notifyContentSizeChangeIfNeeded()
+            UIView.animate(withDuration: streamRowInterval) { self.superview?.layoutIfNeeded() }
+        } else {
+            collectionView.reloadData()
+            invalidateIntrinsicContentSize()
+            notifyContentSizeChangeIfNeeded()
+        }
+
+        if streamedRowLimit >= rowCount {
+            stopRowStreamingTimer()
+            finishRowStreaming()
+        }
     }
 
     // MARK: 布局
@@ -629,7 +743,7 @@ public class GridTableView: UIView, UICollectionViewDataSource {
 
         // 每一行是一个横向 group，group 内每个 item 用「绝对列宽 × 绝对行高」。
         var rowGroups: [NSCollectionLayoutItem] = []
-        for r in start..<rowCount {
+        for r in start..<effectiveRowCount {
             let rowHeight = rowHeights[r]
             var items: [NSCollectionLayoutItem] = []
             for c in 0..<columnCount {
@@ -646,7 +760,7 @@ public class GridTableView: UIView, UICollectionViewDataSource {
         }
 
         let totalWidth = columnWidths.reduce(0, +) + sep * CGFloat(max(columnCount - 1, 0))
-        let gridHeights = rowHeights[start...]
+        let gridHeights = rowHeights[start..<effectiveRowCount]
         let totalHeight = gridHeights.reduce(0, +) + sep * CGFloat(max(gridRowCount - 1, 0))
         let containerSize = NSCollectionLayoutSize(widthDimension: .absolute(max(totalWidth, 1)),
                                                    heightDimension: .absolute(max(totalHeight, 1)))
@@ -770,8 +884,9 @@ public class GridTableView: UIView, UICollectionViewDataSource {
 
         var w = columnWidths.reduce(0, +) + sep * CGFloat(max(columnCount - 1, 0))
 
-        // 网格高度（吸顶时表头与首行之间多一条分割线间隙）。
-        var gridHeight = rowHeights.reduce(0, +) + sep * CGFloat(max(rowCount - 1, 0))
+        // 网格高度（仅统计已揭示的行；吸顶时表头与首行之间多一条分割线间隙）。
+        let visRows = effectiveRowCount
+        var gridHeight = rowHeights.prefix(visRows).reduce(0, +) + sep * CGFloat(max(visRows - 1, 0))
         if gridRowOffset == 1 { gridHeight += sep }
 
         var h = gridHeight
@@ -787,6 +902,14 @@ public class GridTableView: UIView, UICollectionViewDataSource {
         if !w.isFinite { w = 0 }
         if !h.isFinite { h = 0 }
         return CGSize(width: ceil(w), height: ceil(h))
+    }
+
+    /// 若表格自适应尺寸发生变化，则回调通知外部（去重）。
+    private func notifyContentSizeChangeIfNeeded() {
+        let size = intrinsicContentSize
+        guard size != lastNotifiedSize else { return }
+        lastNotifiedSize = size
+        onContentSizeChanged?(size)
     }
 
     // MARK: - 提前计算尺寸（无需实例化 / 加入视图层级）
