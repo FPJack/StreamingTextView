@@ -10,6 +10,7 @@ import Foundation
 import UIKit
 import Down
 import SDWebImage
+import StreamingTextView
 
 /// 自定义 NSTextAttachment：内部用 SDWebImage 下载网络图片，
 /// 下载完成后自动更新自身 image / bounds，并回调通知外部刷新 UI。
@@ -220,14 +221,65 @@ public class DownBridge: NSObject {
 
     /// 解析 Markdown 为富文本，并在方法内部直接完成图片下载（占位 → 异步下载 → 回填）。
     /// 返回的富文本中，图片先显示占位，下载完成后自动更新，并通过 `options.onImageLoaded(range)` 回调刷新对应区域。
+    ///
+    /// 同时会检测 Markdown 里的**表格**（GFM 竖线表格）：
+    /// 命中后把该表格解析成数据，用 `GridTableAttachment` 作为「块级流式附件」插入富文本，
+    /// 在文本里预留出表格的完整尺寸（占位空白）。真正的 `GridTableView` 会由
+    /// `StreamingTextView` 叠加到占位区域上方，并在文字流式打印到此处时**先逐行打印表格**，
+    /// 表格打印完再继续打印后面的文字。
     /// - Parameters:
     ///   - markdown: Markdown 源码。
     ///   - options: 渲染配置（字号、颜色、图片最大宽度、图片下载回调等）。
     @MainActor
     public static func attributedString(fromMarkdown markdown: String,
                                         options: MarkdownRenderOptions) -> NSAttributedString? {
-        let fontSize = options.fontSize
-        let textColor = options.textColor
+        let configuration = makeConfiguration(fontSize: options.fontSize, textColor: options.textColor)
+
+        // 1) 把 Markdown 拆分为「文本段」与「表格段」。
+        let segments = splitSegments(markdown)
+
+        // 2) 逐段渲染并拼接。
+        let result = NSMutableAttributedString()
+        let newlineAttrs: [NSAttributedString.Key: Any] = [.font: UIFont.systemFont(ofSize: options.fontSize)]
+
+        for segment in segments {
+            switch segment {
+            case .text(let md):
+                guard !md.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
+                if let parsed = try? Down(markdownString: md)
+                    .toAttributedString(.normalize, styler: ImageStyler(configuration: configuration)) {
+                    result.append(parsed)
+                }
+            case .table(let tableRows):
+                if #available(iOS 13.0, *) {
+                    let cellModels = tableRows.map { row in row.map { GridCellModel(text: $0) } }
+                    let tableConfig = makeTableConfiguration(maxWidth: options.maxImageWidth,
+                                                             fontSize: options.fontSize,
+                                                             textColor: options.textColor)
+                    let attachment = GridTableAttachment(rows: cellModels, configuration: tableConfig)
+                    // 表格自成一块，前后补换行，保证独占段落。
+                    if result.length > 0 { result.append(NSAttributedString(string: "\n", attributes: newlineAttrs)) }
+                    result.append(NSAttributedString(attachment: attachment))
+                    result.append(NSAttributedString(string: "\n", attributes: newlineAttrs))
+                }
+            }
+        }
+
+        guard result.length > 0 else { return nil }
+
+        // 3) 处理图片（表格附件没有 URL，会被自动跳过）。
+        let final = processImages(in: result,
+                                  maxImageWidth: options.maxImageWidth,
+                                  onImageLoaded: options.onImageLoaded)
+        // 4) 若设置了 textView，则自动绑定手势（内部会按需判断是否真的需要绑定）。
+        if let textView = options.textView {
+            options.bindGestures(to: textView)
+        }
+        return final
+    }
+
+    /// 构建 Down 的样式配置（字体 / 颜色 / 段落样式 / 代码块选项）。
+    private static func makeConfiguration(fontSize: CGFloat, textColor: UIColor) -> DownStylerConfiguration {
         var fonts = StaticFontCollection()
         fonts.body = UIFont.systemFont(ofSize: fontSize)
         fonts.heading1 = UIFont.boldSystemFont(ofSize: fontSize + 9)
@@ -235,7 +287,6 @@ public class DownBridge: NSObject {
         fonts.heading3 = UIFont.boldSystemFont(ofSize: fontSize + 3)
         // 行内代码 + 代码块的字体（等宽字体）。
         fonts.code = UIFont(name: "Menlo", size: fontSize - 1) ?? UIFont.systemFont(ofSize: fontSize - 1)
-
 
         var colors = StaticColorCollection()
         colors.body = textColor
@@ -246,13 +297,11 @@ public class DownBridge: NSObject {
         colors.code = UIColor(red: 0.8, green: 0.1, blue: 0.1, alpha: 1.0) // 深红色
         colors.codeBlockBackground = UIColor(red: 0.96, green: 0.97, blue: 0.98, alpha: 1) // 浅灰蓝色
 
-
         // 代码块段落样式：行距、首行/整体缩进。
         var paragraphStyles = StaticParagraphStyleCollection()
         let codeParagraph = NSMutableParagraphStyle()
         codeParagraph.lineSpacing = 10
         codeParagraph.paragraphSpacingBefore = 6
-
         codeParagraph.paragraphSpacing = 6
         codeParagraph.firstLineHeadIndent = 8
         codeParagraph.headIndent = 8
@@ -276,29 +325,124 @@ public class DownBridge: NSObject {
         // 代码块背景容器的内边距。
         let codeBlockOptions = CodeBlockOptions(containerInset: 8)
 
-        let configuration = DownStylerConfiguration(fonts: fonts,
-                                                    colors: colors,
-                                                    paragraphStyles: paragraphStyles,
-                                                    codeBlockOptions: codeBlockOptions)
+        return DownStylerConfiguration(fonts: fonts,
+                                       colors: colors,
+                                       paragraphStyles: paragraphStyles,
+                                       codeBlockOptions: codeBlockOptions)
+    }
 
-        do {
-            // 使用自定义 styler，让图片变成真正的 NSTextAttachment（并携带 URL）。
-            let parsed = try Down(markdownString: markdown)
-                .toAttributedString(.normalize, styler: ImageStyler(configuration: configuration))
-            // 直接在这里完成图片下载：把占位附件替换为会自下载的 `ImageTextAttachment` 并触发下载。
-            // 图片点击 / 链接跳转由 `MarkdownRenderOptions.bindGestures(to:)` 统一处理。
-            let result = processImages(in: parsed,
-                                       maxImageWidth: options.maxImageWidth,
-                                       onImageLoaded: options.onImageLoaded)
-            // 若设置了 textView，则自动绑定手势（内部会按需判断是否真的需要绑定）。
-            if let textView = options.textView {
-                options.bindGestures(to: textView)
+    // MARK: - Markdown 表格检测 / 解析
+
+    /// Markdown 分段结果。
+    private enum MarkdownSegment {
+        case text(String)
+        case table([[String]])
+    }
+
+    /// 表格配置（用于聊天气泡内展示：限制最大宽度、可横向滑动、蓝底表头）。
+    @available(iOS 13.0, *)
+    private static func makeTableConfiguration(maxWidth: CGFloat,
+                                               fontSize: CGFloat,
+                                               textColor: UIColor) -> GridTableConfiguration {
+        var config = GridTableConfiguration()
+        config.scrollMode = .horizontal      // 列多时可横向滑动
+        config.hasHeaderRow = true
+        config.stickyHeader = false
+        if maxWidth > 0 { config.maxTableWidth = maxWidth }
+        config.maxColumnWidth = maxWidth > 0 ? maxWidth : 200
+        config.minColumnWidth = 44
+        config.separator = GridSeparatorStyle(width: 1, color: UIColor(white: 0.85, alpha: 1))
+        config.border = GridBorderStyle(width: 1, color: UIColor(white: 0.8, alpha: 1), cornerRadius: 8)
+
+        var header = GridCellStyle()
+        header.font = .boldSystemFont(ofSize: fontSize - 1)
+        header.textColor = .white
+        header.backgroundColor = UIColor(red: 0.0, green: 0.48, blue: 1.0, alpha: 1)
+        header.textAlignment = .center
+        config.headerStyle = header
+
+        var cell = GridCellStyle()
+        cell.font = .systemFont(ofSize: fontSize - 1)
+        cell.textColor = textColor
+        cell.backgroundColor = .white
+        config.cellStyle = cell
+        return config
+    }
+
+    /// 把 Markdown 按行扫描，拆分为文本段与表格段（表格 = 表头行 + 分隔行 + 若干数据行）。
+    private static func splitSegments(_ markdown: String) -> [MarkdownSegment] {
+        let lines = markdown.components(separatedBy: "\n")
+        var segments: [MarkdownSegment] = []
+        var textBuffer: [String] = []
+
+        func flushText() {
+            if !textBuffer.isEmpty {
+                segments.append(.text(textBuffer.joined(separator: "\n")))
+                textBuffer.removeAll()
             }
-            return result
-        } catch {
-            print("Error converting markdown: \(error)")
-            return nil
         }
+
+        var i = 0
+        while i < lines.count {
+            // 表格起点：当前行是表格行，且下一行是分隔行（| --- | --- |）。
+            if i + 1 < lines.count, isTableRow(lines[i]), isSeparatorRow(lines[i + 1]) {
+                var tableLines = [lines[i], lines[i + 1]]
+                var j = i + 2
+                while j < lines.count, isTableRow(lines[j]) {
+                    tableLines.append(lines[j])
+                    j += 1
+                }
+                flushText()
+                segments.append(.table(parseTable(tableLines)))
+                i = j
+            } else {
+                textBuffer.append(lines[i])
+                i += 1
+            }
+        }
+        flushText()
+        return segments
+    }
+
+    /// 是否为表格行（去空白后含 `|` 且非空）。
+    private static func isTableRow(_ line: String) -> Bool {
+        let t = line.trimmingCharacters(in: .whitespaces)
+        return !t.isEmpty && t.contains("|")
+    }
+
+    /// 是否为分隔行（每个单元格形如 `---` / `:--` / `--:` / `:-:`）。
+    private static func isSeparatorRow(_ line: String) -> Bool {
+        let cells = splitCells(line)
+        guard !cells.isEmpty else { return false }
+        for c in cells {
+            let t = c.trimmingCharacters(in: .whitespaces)
+            if t.isEmpty { return false }
+            if t.range(of: "^:?-+:?$", options: .regularExpression) == nil { return false }
+        }
+        return true
+    }
+
+    /// 把一行拆成单元格：去掉首尾 `|` 后按 `|` 分割并 trim。
+    private static func splitCells(_ line: String) -> [String] {
+        var t = line.trimmingCharacters(in: .whitespaces)
+        if t.hasPrefix("|") { t.removeFirst() }
+        if t.hasSuffix("|") { t.removeLast() }
+        return t.components(separatedBy: "|").map { $0.trimmingCharacters(in: .whitespaces) }
+    }
+
+    /// 解析表格：第 0 行表头，第 1 行分隔（跳过），其余为数据行；列数对齐到表头。
+    private static func parseTable(_ lines: [String]) -> [[String]] {
+        guard lines.count >= 2 else { return [] }
+        let header = splitCells(lines[0])
+        var rows: [[String]] = [header]
+        let colCount = header.count
+        for k in 2..<lines.count {
+            var cells = splitCells(lines[k])
+            if cells.count < colCount { cells += Array(repeating: "", count: colCount - cells.count) }
+            if cells.count > colCount { cells = Array(cells.prefix(colCount)) }
+            rows.append(cells)
+        }
+        return rows
     }
 
     /// 处理富文本中的图片：把图片占位附件替换为会自下载的 `ImageTextAttachment`

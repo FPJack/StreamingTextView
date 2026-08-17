@@ -19,6 +19,27 @@ private final class DisplayLinkProxy: NSObject {
     }
 }
 
+/// 「块级」流式附件协议：文本流式打印到该附件时会**暂停文字**，
+/// 交由附件自己完成一段动画（例如表格逐行打印），动画结束后再**继续打印后面的文字**。
+///
+/// 典型实现：`GridTableAttachment` —— 附件本身在文本里预留出表格的完整尺寸（占位空白），
+/// 真正的表格视图作为覆盖层添加到 textView 上，位置与占位区域对齐。
+public protocol StreamingBlockAttachment: AnyObject {
+    /// 附件被揭示时调用：在 `hostView` 上按 `frame` 放置自己的视图并开始动画。
+    /// - Parameters:
+    ///   - hostView: 承载覆盖视图的父视图（通常是 textView 本身）。
+    ///   - frame: 附件在 `hostView` 坐标系里的矩形（= 附件预留尺寸）。
+    ///   - animated: 是否播放动画（`false` 表示一次性直接显示，如关闭流式 / 立即完成时）。
+    ///   - completion: 动画结束回调；文字流式会在此之后继续。
+    func beginStreaming(in hostView: UIView, frame: CGRect, animated: Bool, completion: @escaping () -> Void)
+
+    /// 布局变化时重新定位覆盖视图（尺寸保持附件预留尺寸，避免回流）。
+    func updateFrame(_ frame: CGRect, in hostView: UIView)
+
+    /// 从视图层级移除覆盖视图（reset / 复用时调用）。
+    func removeStreamingView()
+}
+
 /// 进度 / 完成 / 尺寸变化回调代理。
 @objc
 public protocol StreamingTextViewDelegate: NSObjectProtocol {
@@ -122,6 +143,9 @@ public class StreamingTextView: UIView {
     /// 上一次上报的内容尺寸，用于检测宽 / 高变化。
     private var lastContentSize: CGSize = .zero
 
+    /// 已开始的块级附件（如表格），记录其字符位置与实例，用于重新定位覆盖视图 / 去重。
+    private var startedBlocks: [(loc: Int, att: StreamingBlockAttachment)] = []
+
     // MARK: - 初始化
 
     /// 使用指定 frame 与外部传入的自定义 UITextView 进行初始化。
@@ -210,6 +234,8 @@ public class StreamingTextView: UIView {
         // 立即显示前缀，然后从该处开始流式显示剩余内容。
         visibleLength = min(startLength, bufferedText.length)
         applyVisibleText()
+        // 前缀里若已包含块级附件，立即（非动画）显示它们。
+        startVisibleUnstartedBlocks(animated: false)
         startDisplayLinkIfNeeded()
     }
 
@@ -246,12 +272,15 @@ public class StreamingTextView: UIView {
     public func finishImmediately() {
         visibleLength = bufferedText.length
         applyVisibleText()
+        // 立即（非动画）启动尚未开始的块级附件。
+        startVisibleUnstartedBlocks(animated: false)
         stopStreaming()
     }
 
     /// 清空所有内容（缓冲区 + 已显示文字）并停止。
     public func reset() {
         stopDisplayLink()
+        clearBlocks()
         resetBuffer()
         visibleLength = 0
         textView.attributedText = NSAttributedString()
@@ -261,6 +290,7 @@ public class StreamingTextView: UIView {
 
     private func resetBuffer() {
         stopDisplayLink()
+        clearBlocks()
         bufferedText = NSMutableAttributedString()
         visibleLength = 0
         textView.attributedText = NSAttributedString()
@@ -309,17 +339,32 @@ public class StreamingTextView: UIView {
         frameCounter = 0
 
         let step = max(charactersPerFrame, 1)
-        let newVisible = min(visibleLength + step, bufferedText.length)
+        var newVisible = min(visibleLength + step, bufferedText.length)
         if newVisible == visibleLength {
             // 已追平缓冲区。停止，等待更多文字到达。
             stopStreaming()
             return
         }
+
+        // 若本次将揭示的范围内存在「块级附件」（如表格），只揭示到该附件（含）为止，
+        // 随后暂停文字流式，等待其自身动画（逐行打印）完成后再继续。
+        var pendingBlock: (loc: Int, att: StreamingBlockAttachment)? = nil
+        if let hit = firstUnstartedBlock(in: NSRange(location: visibleLength, length: newVisible - visibleLength)) {
+            newVisible = hit.loc + 1
+            pendingBlock = hit
+        }
+
         visibleLength = newVisible
         applyVisibleText()
 
         delegate?.streamingTextView?(self, didUpdateVisibleLength: visibleLength, totalLength: bufferedText.length)
         onProgress?(visibleLength, bufferedText.length)
+
+        if let block = pendingBlock {
+            // 暂停文字流式，交给块级附件播放动画，完成后再继续。
+            startBlock(block, pausingStream: true)
+            return
+        }
 
         if visibleLength >= bufferedText.length {
             stopStreaming()
@@ -341,6 +386,7 @@ public class StreamingTextView: UIView {
         let length = min(visibleLength, bufferedText.length)
         let slice = bufferedText.attributedSubstring(from: NSRange(location: 0, length: length))
         textView.attributedText = slice
+        repositionBlocks()
         notifyContentSizeChangeIfNeeded()
     }
 
@@ -350,6 +396,94 @@ public class StreamingTextView: UIView {
         super.layoutSubviews()
         // 视图缩放时宽度可能变化，进而影响换行后的文字高度。
         notifyContentSizeChangeIfNeeded()
+        // 布局变化后重新定位块级附件（如表格）的覆盖视图。
+        repositionBlocks()
+    }
+
+    // MARK: - 块级附件（如表格）流式协调
+
+    /// 在指定范围内查找第一个「尚未开始」的块级附件。
+    private func firstUnstartedBlock(in range: NSRange) -> (loc: Int, att: StreamingBlockAttachment)? {
+        guard range.length > 0, NSMaxRange(range) <= bufferedText.length else { return nil }
+        var found: (Int, StreamingBlockAttachment)?
+        bufferedText.enumerateAttribute(.attachment, in: range, options: []) { value, r, stop in
+            if let att = value as? StreamingBlockAttachment, !isBlockStarted(att) {
+                found = (r.location, att)
+                stop.pointee = true
+            }
+        }
+        guard let f = found else { return nil }
+        return (f.0, f.1)
+    }
+
+    private func isBlockStarted(_ att: StreamingBlockAttachment) -> Bool {
+        startedBlocks.contains { $0.att === att }
+    }
+
+    /// 开始一个块级附件的动画。
+    /// - Parameter pausingStream: 是否暂停文字流式，等其完成后再继续（`true` 用于动画流式）。
+    private func startBlock(_ block: (loc: Int, att: StreamingBlockAttachment), pausingStream: Bool) {
+        startedBlocks.append(block)
+        let rect = rectForAttachment(at: block.loc)
+        if pausingStream && isStreamingEnabled {
+            stopDisplayLink()   // 暂停文字（isStreaming 仍为 true）
+            block.att.beginStreaming(in: textView, frame: rect, animated: true) { [weak self] in
+                self?.resumeAfterBlock()
+            }
+        } else {
+            block.att.beginStreaming(in: textView, frame: rect, animated: false) {}
+        }
+    }
+
+    /// 块级附件动画完成后，继续文字流式（或收尾）。
+    private func resumeAfterBlock() {
+        if visibleLength >= bufferedText.length {
+            stopStreaming()
+        } else {
+            startDisplayLinkIfNeeded()
+        }
+    }
+
+    /// 立即（非动画）启动当前已可见但尚未开始的块级附件。
+    private func startVisibleUnstartedBlocks(animated: Bool) {
+        let range = NSRange(location: 0, length: min(visibleLength, bufferedText.length))
+        guard range.length > 0 else { return }
+        var blocks: [(Int, StreamingBlockAttachment)] = []
+        bufferedText.enumerateAttribute(.attachment, in: range, options: []) { value, r, _ in
+            if let att = value as? StreamingBlockAttachment, !isBlockStarted(att) {
+                blocks.append((r.location, att))
+            }
+        }
+        for b in blocks { startBlock((loc: b.0, att: b.1), pausingStream: animated) }
+    }
+
+    /// 重新定位所有已开始块级附件的覆盖视图。
+    private func repositionBlocks() {
+        guard !startedBlocks.isEmpty else { return }
+        for block in startedBlocks where block.loc < bufferedText.length {
+            let rect = rectForAttachment(at: block.loc)
+            block.att.updateFrame(rect, in: textView)
+        }
+    }
+
+    /// 移除所有块级附件的覆盖视图并清空记录。
+    private func clearBlocks() {
+        for block in startedBlocks { block.att.removeStreamingView() }
+        startedBlocks.removeAll()
+    }
+
+    /// 计算某个字符（附件）在 textView 坐标系里的矩形。
+    private func rectForAttachment(at index: Int) -> CGRect {
+        guard index < textView.textStorage.length else { return .zero }
+        let lm = textView.layoutManager
+        let tc = textView.textContainer
+        lm.ensureLayout(for: tc)
+        let glyphRange = lm.glyphRange(forCharacterRange: NSRange(location: index, length: 1),
+                                       actualCharacterRange: nil)
+        var rect = lm.boundingRect(forGlyphRange: glyphRange, in: tc)
+        rect.origin.x += textView.textContainerInset.left
+        rect.origin.y += textView.textContainerInset.top
+        return rect
     }
 
     /// 已显示文字实际占用的尺寸（适配当前 / 最大宽度，并限制到最大 / 最小宽高）。

@@ -553,7 +553,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = fanpentest;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_ENABLE_EXPLICIT_MODULES = NO;
-				SWIFT_INCLUDE_PATHS = "$(inherited) \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\"";
+				SWIFT_INCLUDE_PATHS = "$(inherited) \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\"";
 				SWIFT_OBJC_BRIDGING_HEADER = "StreamingTextView/StreamingTextView_Example-Bridging-Header.h";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_SWIFT3_OBJC_INFERENCE = Default;
@@ -576,7 +576,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = fanpentest;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_ENABLE_EXPLICIT_MODULES = NO;
-				SWIFT_INCLUDE_PATHS = "$(inherited) \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\"";
+				SWIFT_INCLUDE_PATHS = "$(inherited) \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\"";
 				SWIFT_OBJC_BRIDGING_HEADER = "StreamingTextView/StreamingTextView_Example-Bridging-Header.h";
 				SWIFT_SWIFT3_OBJC_INFERENCE = Default;
 				SWIFT_VERSION = 6.0;
@@ -603,7 +603,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = fanpentest;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_ENABLE_EXPLICIT_MODULES = NO;
-				SWIFT_INCLUDE_PATHS = "$(inherited) \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\"";
+				SWIFT_INCLUDE_PATHS = "$(inherited) \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\"";
 				SWIFT_SWIFT3_OBJC_INFERENCE = Default;
 				SWIFT_VERSION = 4.0;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/StreamingTextView_Example.app/StreamingTextView_Example";
@@ -626,7 +626,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = "org.cocoapods.$(PRODUCT_NAME:rfc1034identifier)";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_ENABLE_EXPLICIT_MODULES = NO;
-				SWIFT_INCLUDE_PATHS = "$(inherited) \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\"";
+				SWIFT_INCLUDE_PATHS = "$(inherited) \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\" \"${PODS_ROOT}/Down/Sources/cmark/**\"";
 				SWIFT_SWIFT3_OBJC_INFERENCE = Default;
 				SWIFT_VERSION = 4.0;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/StreamingTextView_Example.app/StreamingTextView_Example";
