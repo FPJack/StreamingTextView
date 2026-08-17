@@ -42,7 +42,7 @@ class GridTableViewController: UIViewController {
             gridTable.topAnchor.constraint(equalTo: guide.topAnchor, constant: 16),
             gridTable.leadingAnchor.constraint(equalTo: guide.leadingAnchor, constant: 16),
             gridTable.trailingAnchor.constraint(equalTo: guide.trailingAnchor, constant: -16),
-            gridTable.bottomAnchor.constraint(equalTo: guide.bottomAnchor, constant: -16),
+            // 不固定高度：由 GridTableView 的 intrinsicContentSize 自适应（受 maxTableHeight 限制）。
         ])
 
         applyData()
@@ -72,6 +72,9 @@ class GridTableViewController: UIViewController {
         config.zoomEnabled = true
         config.minZoomScale = 0.6
         config.maxZoomScale = 2.5
+        // 表格自适应宽高：高度随内容增长，但不超过 420；不足 120 时按 120。
+        config.maxTableHeight = 420
+        config.minTableHeight = 120
 
         config.separator = GridSeparatorStyle(width: 1, color: UIColor(white: 0.85, alpha: 1))
         config.border = GridBorderStyle(width: 1, color: UIColor(white: 0.75, alpha: 1), cornerRadius: 10)

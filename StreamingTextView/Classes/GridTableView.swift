@@ -104,6 +104,15 @@ public struct GridTableConfiguration {
     /// 最大缩放系数。
     public var maxZoomScale: CGFloat = 3.0
 
+    /// 表格自适应的最大宽度（0 表示不限制）。用于 `intrinsicContentSize`。
+    public var maxTableWidth: CGFloat = 0
+    /// 表格自适应的最小宽度（0 表示不限制）。
+    public var minTableWidth: CGFloat = 0
+    /// 表格自适应的最大高度（0 表示不限制）。超出后内容可滚动。
+    public var maxTableHeight: CGFloat = 0
+    /// 表格自适应的最小高度（0 表示不限制）。
+    public var minTableHeight: CGFloat = 0
+
     /// 是否把首行作为表头（使用 `headerStyle`）。
     public var hasHeaderRow: Bool = true
 
@@ -299,6 +308,7 @@ public class GridTableView: UIView, UICollectionViewDataSource {
         applyStretch(availableWidth: size.width, availableHeight: size.height)
         buildStickyHeader()
         collectionView.setCollectionViewLayout(makeLayout(), animated: false)
+        invalidateIntrinsicContentSize()
     }
 
     // MARK: 私有状态
@@ -592,6 +602,7 @@ public class GridTableView: UIView, UICollectionViewDataSource {
             buildStickyHeader()
             collectionView.setCollectionViewLayout(makeLayout(), animated: false)
             collectionView.reloadData()
+            invalidateIntrinsicContentSize()
         default:
             break
         }
@@ -793,7 +804,7 @@ public class GridTableView: UIView, UICollectionViewDataSource {
 
     // MARK: 尺寸自适应
 
-    /// 表格内容总尺寸（含分割线间隙）。可用于外部约束高度 / 宽度。
+    /// 网格内容总尺寸（含分割线间隙，不含头 / 尾视图）。
     public var contentSize: CGSize {
         let sep = configuration.separator.width
         let w = columnWidths.reduce(0, +) + sep * CGFloat(max(columnCount - 1, 0))
@@ -801,8 +812,39 @@ public class GridTableView: UIView, UICollectionViewDataSource {
         return CGSize(width: w, height: h)
     }
 
+    /// 头 / 尾自定义视图的高度（优先用显式高度，否则用视图自身的合适高度）。
+    private func accessoryHeight(_ view: UIView?, explicit: CGFloat) -> CGFloat {
+        guard let view = view else { return 0 }
+        if explicit > 0 { return explicit }
+        let intrinsic = view.intrinsicContentSize.height
+        if intrinsic > 0, intrinsic != UIView.noIntrinsicMetric { return intrinsic }
+        let fitting = view.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).height
+        return fitting > 0 ? fitting : view.bounds.height
+    }
+
+    /// 表格自适应尺寸：网格内容 + 头 / 尾视图，并限制到最大 / 最小宽高。
     public override var intrinsicContentSize: CGSize {
-        contentSize
+        let sep = configuration.separator.width
+
+        var w = columnWidths.reduce(0, +) + sep * CGFloat(max(columnCount - 1, 0))
+
+        // 网格高度（吸顶时表头与首行之间多一条分割线间隙）。
+        var gridHeight = rowHeights.reduce(0, +) + sep * CGFloat(max(rowCount - 1, 0))
+        if gridRowOffset == 1 { gridHeight += sep }
+
+        var h = gridHeight
+            + accessoryHeight(tableHeaderView, explicit: tableHeaderHeight)
+            + accessoryHeight(tableFooterView, explicit: tableFooterHeight)
+
+        // 限制到最大 / 最小。
+        if configuration.maxTableWidth > 0 { w = min(w, configuration.maxTableWidth) }
+        if configuration.minTableWidth > 0 { w = max(w, configuration.minTableWidth) }
+        if configuration.maxTableHeight > 0 { h = min(h, configuration.maxTableHeight) }
+        if configuration.minTableHeight > 0 { h = max(h, configuration.minTableHeight) }
+
+        if !w.isFinite { w = 0 }
+        if !h.isFinite { h = 0 }
+        return CGSize(width: ceil(w), height: ceil(h))
     }
 
     // MARK: - UICollectionViewDataSource
