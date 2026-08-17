@@ -32,6 +32,13 @@ private class StreamCell: UITableViewCell {
     let streamingView = StreamingTextView()
     /// 当内部文字内容高度变化时回调（用于驱动 tableView 更新行高）。
     var onContentHeightChange: ((CGFloat) -> Void)?
+    /// 点击到图片附件时回调（被点图片 + 全部图片）。
+    var onImageTapped: ((ImageTextAttachment, [ImageTextAttachment]) -> Void)?
+    /// 点击到链接时回调。
+    var onLinkTapped: ((URL) -> Void)?
+
+    /// textView 手势管理（图片点击 + 链接跳转）。
+    private var gestureManager: TextViewGestureManager?
 
     override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
         super.init(style: style, reuseIdentifier: reuseIdentifier)
@@ -46,6 +53,15 @@ private class StreamCell: UITableViewCell {
         streamingView.layer.borderColor = UIColor(white: 0.88, alpha: 1.0).cgColor
         streamingView.maxTextWidth = UIScreen.main.bounds.width - kCellHInset * 2.0
         contentView.addSubview(streamingView)
+
+        // 用手势管理类统一处理图片点击 + 链接跳转（内部自行添加手势，不拦截 textView 原生交互）。
+        gestureManager = TextViewGestureManager(textView: streamingView.textView)
+        gestureManager?.onImageTapped = { [weak self] tapped, allImages in
+            self?.onImageTapped?(tapped, allImages)
+        }
+        gestureManager?.onLinkTapped = { [weak self] url in
+            self?.onLinkTapped?(url)
+        }
 
         NSLayoutConstraint.activate([
             streamingView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: kCellVInset),
@@ -74,6 +90,8 @@ class TableStreamViewController: UIViewController, UITableViewDataSource, UITabl
     private var nextScriptIndex = 0
     /// 是否自动跟随到底部（用户手动上滑离开底部后暂停跟随，回到底部附近后恢复）。
     private var autoScrollToBottom = true
+    /// 外部可设置：富文本内有多张图片时，预览是否支持左右滑动浏览。
+    var allowsImageSwipe = true
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -154,9 +172,6 @@ class TableStreamViewController: UIViewController, UITableViewDataSource, UITabl
         options.fontSize = 16.0
         options.textColor = UIColor(white: 0.15, alpha: 1.0)
         options.maxImageWidth = maxImageWidth
-        options.onImageLoaded = { [weak self] attach in
-
-        }
         return DownBridge.attributedString(fromMarkdown: markdown, options: options)!
 
     }
@@ -218,6 +233,25 @@ class TableStreamViewController: UIViewController, UITableViewDataSource, UITabl
             guard let self = self, let item = item else { return }
             self.handleFinish(for: item)
         }
+        cell.onImageTapped = { [weak self] tapped, allImages in
+            guard let self = self else { return }
+            var images: [UIImage] = []
+            var startIndex = 0
+            for att in allImages {
+                if let img = att.image {
+                    if att === tapped { startIndex = images.count }
+                    images.append(img)
+                }
+            }
+            guard !images.isEmpty else { return }
+            ImagePreviewer.shared.present(images,
+                                          startIndex: startIndex,
+                                          from: self.view,
+                                          allowsSwipe: self.allowsImageSwipe)
+        }
+        cell.onLinkTapped = { url in
+            UIApplication.shared.open(url)
+        }
 
         // 仅首次开始流式，避免复用 / 行高刷新时重启动画。
         if !item.started {
@@ -225,6 +259,10 @@ class TableStreamViewController: UIViewController, UITableViewDataSource, UITabl
             cell.streamingView.charactersPerFrame = 1
             cell.streamingView.frameInterval = 2
             cell.streamingView.startStreamingAttributedText(item.attributedText)
+        }else {
+            // 复用时直接显示完整内容。
+            cell.streamingView.reset()
+            cell.streamingView.textView.attributedText = item.attributedText
         }
         return cell
     }

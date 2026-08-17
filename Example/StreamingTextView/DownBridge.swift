@@ -27,7 +27,10 @@ public class ImageTextAttachment: NSTextAttachment {
 
     /// 图片下载完成（成功）后回调，外部据此刷新对应区域 / 高度。
     public var onImageLoaded: ((ImageTextAttachment) -> Void)?
-    
+
+    /// 图片被点击后回调，外部据此做预览 / 跳转等操作。
+    public var onImageTapped: ((ImageTextAttachment) -> Void)?
+
     public var range: NSRange = NSRange(location: 0, length: 0)
 
     /// 开始异步下载图片（会先设置占位图，完成后替换并回调）。
@@ -137,6 +140,9 @@ public class MarkdownRenderOptions: NSObject {
     /// 单张图片下载完成后的回调，参数为其在富文本中的 range。
     public var onImageLoaded: ((ImageTextAttachment) -> Void)?
 
+    /// 图片点击事件回调，参数为被点击的图片附件。
+    public var onImageTapped: ((ImageTextAttachment) -> Void)?
+
     public override init() {
         super.init()
     }
@@ -164,7 +170,7 @@ public class DownBridge: NSObject {
     /// Down 的代码块背景 / 引用竖线 / 分隔线等是自定义 block 属性，
     /// 只有 `DownLayoutManager` 才会绘制；普通 UITextView 的默认 layoutManager 不会画，
     /// 所以要展示代码块背景色必须用它来承载文本。
-    public static func makeDownTextView() -> UITextView {
+   @MainActor public static func makeDownTextView() -> UITextView {
         let textStorage = NSTextStorage()
         let layoutManager = DownLayoutManager()
         textStorage.addLayoutManager(layoutManager)
@@ -193,7 +199,7 @@ public class DownBridge: NSObject {
         fonts.heading3 = UIFont.boldSystemFont(ofSize: fontSize + 3)
         // 行内代码 + 代码块的字体（等宽字体）。
         fonts.code = UIFont(name: "Menlo", size: fontSize - 1) ?? UIFont.systemFont(ofSize: fontSize - 1)
-        
+
 
         var colors = StaticColorCollection()
         colors.body = textColor
@@ -203,14 +209,14 @@ public class DownBridge: NSObject {
         // 代码文字颜色 + 代码块背景色（背景色由 codeBlockBackground 控制）。
         colors.code = UIColor(red: 0.8, green: 0.1, blue: 0.1, alpha: 1.0) // 深红色
         colors.codeBlockBackground = UIColor(red: 0.96, green: 0.97, blue: 0.98, alpha: 1) // 浅灰蓝色
-        
+
 
         // 代码块段落样式：行距、首行/整体缩进。
         var paragraphStyles = StaticParagraphStyleCollection()
         let codeParagraph = NSMutableParagraphStyle()
         codeParagraph.lineSpacing = 10
         codeParagraph.paragraphSpacingBefore = 6
-        
+
         codeParagraph.paragraphSpacing = 6
         codeParagraph.firstLineHeadIndent = 8
         codeParagraph.headIndent = 8
@@ -244,7 +250,10 @@ public class DownBridge: NSObject {
             let parsed = try Down(markdownString: markdown)
                 .toAttributedString(.normalize, styler: ImageStyler(configuration: configuration))
             // 直接在这里完成图片下载：把占位附件替换为会自下载的 `ImageTextAttachment` 并触发下载。
-            return processImages(in: parsed, maxImageWidth: options.maxImageWidth, onImageLoaded: options.onImageLoaded)
+            return processImages(in: parsed,
+                                 maxImageWidth: options.maxImageWidth,
+                                 onImageLoaded: options.onImageLoaded,
+                                 onImageTapped: options.onImageTapped)
         } catch {
             print("Error converting markdown: \(error)")
             return nil
@@ -258,9 +267,11 @@ public class DownBridge: NSObject {
     ///   - attributedText: 待处理的富文本（通常来自 `attributedString(fromMarkdown:...)`）。
     ///   - maxImageWidth: 图片显示的最大宽度（按比例缩放）。
     ///   - onImageLoaded: 单张图片下载完成后的回调，参数为其在富文本中的 range。
+    ///   - onImageTapped: 图片点击事件回调，参数为被点击的图片附件。
     public static func processImages(in attributedText: NSAttributedString,
                                      maxImageWidth: CGFloat,
-                                     onImageLoaded: ((ImageTextAttachment) -> Void)?) -> NSAttributedString {
+                                     onImageLoaded: ((ImageTextAttachment) -> Void)?,
+                                     onImageTapped: ((ImageTextAttachment) -> Void)? = nil) -> NSAttributedString {
         let rich = NSMutableAttributedString(attributedString: attributedText)
         let urlKey = NSAttributedString.Key(imageURLAttributeName)
         let fullRange = NSRange(location: 0, length: rich.length)
@@ -278,11 +289,53 @@ public class DownBridge: NSObject {
             attachment.onImageLoaded = { attach in
                 onImageLoaded?(attach)
             }
+            attachment.onImageTapped = onImageTapped
             rich.addAttribute(.attachment, value: attachment, range: range)
             attachment.loadImage()
         }
 
         return rich
+    }
+
+    /// 根据点击坐标，在 UITextView 中命中图片附件（`ImageTextAttachment`）。
+    /// 用于给承载 Markdown 富文本的 textView 加点击手势后定位被点的图片。
+    /// - Parameters:
+    ///   - point: 相对于 textView 的点击坐标（如 `gesture.location(in: textView)`）。
+    ///   - textView: 承载富文本的 UITextView。
+    /// - Returns: 命中的图片附件，未命中返回 nil。
+   @MainActor public static func imageAttachment(at point: CGPoint, in textView: UITextView) -> ImageTextAttachment? {
+        let layoutManager = textView.layoutManager
+        let container = textView.textContainer
+
+        // 换算到 textContainer 坐标系（扣除内边距）。
+        var location = point
+        location.x -= textView.textContainerInset.left
+        location.y -= textView.textContainerInset.top
+
+        let glyphIndex = layoutManager.glyphIndex(for: location, in: container)
+        // 确认点击确实落在该 glyph 的绘制矩形内，避免点空白也命中最近的图片。
+        let glyphRect = layoutManager.boundingRect(forGlyphRange: NSRange(location: glyphIndex, length: 1), in: container)
+        guard glyphRect.contains(location) else { return nil }
+
+        let charIndex = layoutManager.characterIndexForGlyph(at: glyphIndex)
+        guard charIndex < textView.textStorage.length else { return nil }
+        return textView.textStorage.attribute(.attachment, at: charIndex, effectiveRange: nil) as? ImageTextAttachment
+    }
+
+    /// 按出现顺序收集富文本里的全部图片附件（`ImageTextAttachment`）。
+    /// 用于多图预览时左右滑动浏览。
+    /// - Parameter textView: 承载富文本的 UITextView。
+    /// - Returns: 顺序排列的图片附件数组。
+    public static func imageAttachments(in textView: UITextView) -> [ImageTextAttachment] {
+        var result: [ImageTextAttachment] = []
+        let storage = textView.textStorage
+        let fullRange = NSRange(location: 0, length: storage.length)
+        storage.enumerateAttribute(.attachment, in: fullRange, options: []) { value, _, _ in
+            if let attachment = value as? ImageTextAttachment {
+                result.append(attachment)
+            }
+        }
+        return result
     }
 
     /// 递归遍历并打印 AST。

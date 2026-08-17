@@ -20,7 +20,8 @@ private final class DisplayLinkProxy: NSObject {
 }
 
 /// 进度 / 完成 / 尺寸变化回调代理。
-@objc public protocol StreamingTextViewDelegate: NSObjectProtocol {
+@objc
+public protocol StreamingTextViewDelegate: NSObjectProtocol {
     /// 每当可见文字长度变化（即每帧）时回调。
     @objc optional func streamingTextView(_ textView: StreamingTextView,
                                           didUpdateVisibleLength visibleLength: Int,

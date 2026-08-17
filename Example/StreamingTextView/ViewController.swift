@@ -6,7 +6,7 @@
 import UIKit
 import StreamingTextView
 
-class ViewController: UIViewController, StreamingTextViewDelegate {
+class ViewController: UIViewController, @MainActor StreamingTextViewDelegate {
 
     private var streamingView: StreamingTextView!
     private let statusLabel = UILabel()

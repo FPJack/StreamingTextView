@@ -37,17 +37,44 @@ end
 
 
 
+#post_install do |installer|
+#  cmark_header = File.join(installer.sandbox.root, 'Down/Sources/cmark/cmark.h')
+#  if File.exist?(cmark_header)
+#    contents = File.read(cmark_header)
+#    patched = contents
+#                .gsub('#include <cmark_export.h>', '#include "cmark_export.h"')
+#                .gsub('#include <cmark_version.h>', '#include "cmark_version.h"')
+#    if patched != contents
+#      File.chmod(0644, cmark_header) rescue nil
+#      File.write(cmark_header, patched)
+#      puts '[post_install] Patched Down cmark.h angle-bracket includes.'
+#    end
+#  end
+#end
+
+
 post_install do |installer|
-  cmark_header = File.join(installer.sandbox.root, 'Down/Sources/cmark/cmark.h')
-  if File.exist?(cmark_header)
-    contents = File.read(cmark_header)
-    patched = contents
-                .gsub('#include <cmark_export.h>', '#include "cmark_export.h"')
-                .gsub('#include <cmark_version.h>', '#include "cmark_version.h"')
-    if patched != contents
-      File.chmod(0644, cmark_header) rescue nil
-      File.write(cmark_header, patched)
-      puts '[post_install] Patched Down cmark.h angle-bracket includes.'
+  installer.pods_project.targets.each do |target|
+    target.build_configurations.each do |config|
+      # 关闭 Xcode 16+ 默认开启的“显式构建模块”，
+      # 修复 Down 依赖 libcmark 时报 "missing required module 'libcmark'"
+      config.build_settings['SWIFT_ENABLE_EXPLICIT_MODULES'] = 'NO'
+      config.build_settings['CLANG_ENABLE_EXPLICIT_MODULES'] = 'NO'
     end
+  end
+
+  # 同时对主工程 target 也关闭
+  installer.aggregate_targets.each do |aggregate_target|
+    aggregate_target.user_project.native_targets.each do |target|
+      target.build_configurations.each do |config|
+        config.build_settings['SWIFT_ENABLE_EXPLICIT_MODULES'] = 'NO'
+        config.build_settings['CLANG_ENABLE_EXPLICIT_MODULES'] = 'NO'
+        # App 目标 import Down 时需要能找到 Down 序列化依赖的 libcmark 模块的 modulemap，
+        # 否则报 "missing required module 'libcmark'"。指到 cmark 源码目录（递归）。
+        config.build_settings['SWIFT_INCLUDE_PATHS'] ||= '$(inherited)'
+        config.build_settings['SWIFT_INCLUDE_PATHS'] = "#{config.build_settings['SWIFT_INCLUDE_PATHS']} \"${PODS_ROOT}/Down/Sources/cmark/**\""
+      end
+    end
+    aggregate_target.user_project.save
   end
 end
