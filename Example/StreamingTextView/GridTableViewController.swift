@@ -14,6 +14,8 @@ class GridTableViewController: UIViewController {
     private let gridTable = GridTableView()
     /// 三种滑动模式循环切换：双向 → 仅横向 → 仅纵向。
     private var scrollMode: GridScrollMode = .both
+    /// 是否把剩余宽高按比例分摊填满。
+    private var stretchToFill = false
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -63,6 +65,9 @@ class GridTableViewController: UIViewController {
         config.minColumnWidth = 60
         config.hasHeaderRow = true
         config.stickyHeader = true       // 表头吸顶
+        // 内容不足以填满表格时，按比例分摊剩余宽/高。
+        config.stretchColumnsToFill = stretchToFill
+        config.stretchRowsToFill = stretchToFill
 
         config.separator = GridSeparatorStyle(width: 1, color: UIColor(white: 0.85, alpha: 1))
         config.border = GridBorderStyle(width: 1, color: UIColor(white: 0.75, alpha: 1), cornerRadius: 10)
@@ -99,9 +104,23 @@ class GridTableViewController: UIViewController {
         ]
 
         var rows: [[GridCellModel]] = []
-        rows.append(header0.map { GridCellModel(text: $0) })
+
+        if stretchToFill {
+            // 填充演示：用较少的行列，让内容小于表格，从而观察剩余空间被按比例分摊。
+            rows.append(["姓名", "部门", "分数"].map { GridCellModel(text: $0) })
+            let small: [[String]] = [
+                ["张三", "研发", "92"],
+                ["李四", "设计", "88"],
+                ["王五", "产品", "95"],
+                ["赵六", "测试", "80"],
+            ]
+            for r in small { rows.append(r.map { GridCellModel(text: $0) }) }
+            gridTable.setRows(rows, configuration: config)
+            return
+        }
 
         // 生成 40 行数据，行多以便上下滑动。
+        rows.append(header0.map { GridCellModel(text: $0) })
         for i in 0..<40 {
             let name = names[i % names.count] + "\(i)"
             let dept = departments[i % departments.count]
@@ -179,7 +198,12 @@ class GridTableViewController: UIViewController {
         exportButton.titleLabel?.font = .systemFont(ofSize: 14)
         exportButton.addTarget(self, action: #selector(onExport), for: .touchUpInside)
 
-        let stack = UIStackView(arrangedSubviews: [titleLabel, UIView(), copyButton, exportButton])
+        let fillButton = UIButton(type: .system)
+        fillButton.setTitle("填充:关", for: .normal)
+        fillButton.titleLabel?.font = .systemFont(ofSize: 14)
+        fillButton.addTarget(self, action: #selector(onToggleFill(_:)), for: .touchUpInside)
+
+        let stack = UIStackView(arrangedSubviews: [titleLabel, UIView(), fillButton, copyButton, exportButton])
         stack.axis = .horizontal
         stack.spacing = 16
         stack.alignment = .center
@@ -217,5 +241,11 @@ class GridTableViewController: UIViewController {
 
     @objc private func onExport() {
         print("导出表格数据")
+    }
+
+    @objc private func onToggleFill(_ sender: UIButton) {
+        stretchToFill.toggle()
+        sender.setTitle(stretchToFill ? "填充:开" : "填充:关", for: .normal)
+        applyData()
     }
 }

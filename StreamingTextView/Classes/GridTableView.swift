@@ -92,6 +92,11 @@ public struct GridTableConfiguration {
     /// 行最小高度（0 表示不限制）。
     public var minRowHeight: CGFloat = 0
 
+    /// 当内容总宽度小于表格可用宽度时，是否把剩余宽度按各列内容宽度比例分摊，填满宽度。
+    public var stretchColumnsToFill: Bool = false
+    /// 当内容总高度小于表格可用高度时，是否把剩余高度按各行内容高度比例分摊，填满高度。
+    public var stretchRowsToFill: Bool = false
+
     /// 是否把首行作为表头（使用 `headerStyle`）。
     public var hasHeaderRow: Bool = true
 
@@ -255,12 +260,27 @@ public class GridTableView: UIView, UICollectionViewDataSource {
     public func reload() {
         recomputeCounts()
         computeSizes()
+        applyStretch(availableWidth: collectionView.bounds.width, availableHeight: collectionView.bounds.height)
         applyBorderAndSeparatorColor()
         applyScrollMode()
         buildStickyHeader()
         collectionView.setCollectionViewLayout(makeLayout(), animated: false)
         collectionView.reloadData()
         invalidateIntrinsicContentSize()
+        lastLaidOutSize = collectionView.bounds.size
+    }
+
+    public override func layoutSubviews() {
+        super.layoutSubviews()
+        // 尺寸变化且开启了填充时，重新按新的可用尺寸分摊剩余空间并刷新布局。
+        let size = collectionView.bounds.size
+        guard size != lastLaidOutSize else { return }
+        lastLaidOutSize = size
+        guard configuration.stretchColumnsToFill || configuration.stretchRowsToFill,
+              columnCount > 0 else { return }
+        applyStretch(availableWidth: size.width, availableHeight: size.height)
+        buildStickyHeader()
+        collectionView.setCollectionViewLayout(makeLayout(), animated: false)
     }
 
     // MARK: 私有状态
@@ -287,8 +307,14 @@ public class GridTableView: UIView, UICollectionViewDataSource {
 
     private var rowCount = 0
     private var columnCount = 0
+    /// 内容测量得到的原始列宽 / 行高（未拉伸）。
+    private var baseColumnWidths: [CGFloat] = []
+    private var baseRowHeights: [CGFloat] = []
+    /// 最终展示用列宽 / 行高（可能包含拉伸后的分摊）。
     private var columnWidths: [CGFloat] = []
     private var rowHeights: [CGFloat] = []
+    /// 上次布局时集合视图的尺寸，用于在尺寸变化时重新分摊剩余空间。
+    private var lastLaidOutSize: CGSize = .zero
 
     /// 吸顶生效时，网格渲染从第 1 行开始（第 0 行由吸顶表头单独渲染）。
     private var gridRowOffset: Int {
@@ -441,11 +467,12 @@ public class GridTableView: UIView, UICollectionViewDataSource {
     /// 计算列宽（同列取最大内容宽，受 min/max 约束）与行高（同行取最大内容高）。
     private func computeSizes() {
         guard rowCount > 0, columnCount > 0 else {
+            baseColumnWidths = []; baseRowHeights = []
             columnWidths = []; rowHeights = []; return
         }
 
         // 1) 列宽：每列取该列所有单元格内容宽度的最大值。
-        columnWidths = Array(repeating: 0, count: columnCount)
+        baseColumnWidths = Array(repeating: 0, count: columnCount)
         for c in 0..<columnCount {
             var maxW: CGFloat = 0
             for r in 0..<rowCount {
@@ -456,21 +483,69 @@ public class GridTableView: UIView, UICollectionViewDataSource {
             }
             if configuration.maxColumnWidth > 0 { maxW = min(maxW, configuration.maxColumnWidth) }
             if configuration.minColumnWidth > 0 { maxW = max(maxW, configuration.minColumnWidth) }
-            columnWidths[c] = ceil(maxW)
+            baseColumnWidths[c] = ceil(maxW)
         }
 
         // 2) 行高：在确定列宽后，每行取该行所有单元格内容高度的最大值。
-        rowHeights = Array(repeating: 0, count: rowCount)
+        baseRowHeights = Array(repeating: 0, count: rowCount)
         for r in 0..<rowCount {
             var maxH: CGFloat = 0
             for c in 0..<columnCount {
                 guard let m = model(row: r, column: c) else { continue }
                 let style = effectiveStyle(row: r, column: c)
-                maxH = max(maxH, measure(m, style: style, maxWidth: columnWidths[c]).height)
+                maxH = max(maxH, measure(m, style: style, maxWidth: baseColumnWidths[c]).height)
             }
             if configuration.maxRowHeight > 0 { maxH = min(maxH, configuration.maxRowHeight) }
             if configuration.minRowHeight > 0 { maxH = max(maxH, configuration.minRowHeight) }
-            rowHeights[r] = ceil(maxH)
+            baseRowHeights[r] = ceil(maxH)
+        }
+
+        // 初始展示尺寸 = 原始尺寸（拉伸在 applyStretch 中按可用尺寸计算）。
+        columnWidths = baseColumnWidths
+        rowHeights = baseRowHeights
+    }
+
+    /// 若开启了填充，则把「可用尺寸 - 内容尺寸」的剩余空间按各列 / 各行的内容比例分摊。
+    private func applyStretch(availableWidth: CGFloat, availableHeight: CGFloat) {
+        guard columnCount > 0 else { return }
+        columnWidths = baseColumnWidths
+        rowHeights = baseRowHeights
+        let sep = configuration.separator.width
+
+        // 列：分摊剩余宽度。
+        if configuration.stretchColumnsToFill {
+            let content = baseColumnWidths.reduce(0, +) + sep * CGFloat(max(columnCount - 1, 0))
+            let extra = availableWidth - content
+            if extra > 0.5 {
+                let baseSum = baseColumnWidths.reduce(0, +)
+                if baseSum > 0 {
+                    for i in 0..<columnCount {
+                        columnWidths[i] = baseColumnWidths[i] + extra * (baseColumnWidths[i] / baseSum)
+                    }
+                } else {
+                    let each = extra / CGFloat(columnCount)
+                    columnWidths = baseColumnWidths.map { $0 + each }
+                }
+            }
+        }
+
+        // 行：仅对参与网格渲染的行分摊剩余高度（吸顶表头行不拉伸）。
+        if configuration.stretchRowsToFill, gridRowCount > 0 {
+            let start = gridRowOffset
+            let gridBase = baseRowHeights[start...]
+            let content = gridBase.reduce(0, +) + sep * CGFloat(max(gridRowCount - 1, 0))
+            let extra = availableHeight - content
+            if extra > 0.5 {
+                let baseSum = gridBase.reduce(0, +)
+                if baseSum > 0 {
+                    for i in start..<rowCount {
+                        rowHeights[i] = baseRowHeights[i] + extra * (baseRowHeights[i] / baseSum)
+                    }
+                } else {
+                    let each = extra / CGFloat(gridRowCount)
+                    for i in start..<rowCount { rowHeights[i] = baseRowHeights[i] + each }
+                }
+            }
         }
     }
 
