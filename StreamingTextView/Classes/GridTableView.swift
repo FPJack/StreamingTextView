@@ -506,36 +506,10 @@ public class GridTableView: UIView, UICollectionViewDataSource {
             baseColumnWidths = []; baseRowHeights = []
             columnWidths = []; rowHeights = []; return
         }
-
-        // 1) 列宽：每列取该列所有单元格内容宽度的最大值。
-        baseColumnWidths = Array(repeating: 0, count: columnCount)
-        for c in 0..<columnCount {
-            var maxW: CGFloat = 0
-            for r in 0..<rowCount {
-                guard let m = model(row: r, column: c) else { continue }
-                let style = effectiveStyle(row: r, column: c)
-                let limit = configuration.maxColumnWidth > 0 ? configuration.maxColumnWidth : .greatestFiniteMagnitude
-                maxW = max(maxW, measure(m, style: style, maxWidth: limit).width)
-            }
-            if configuration.maxColumnWidth > 0 { maxW = min(maxW, configuration.maxColumnWidth) }
-            if configuration.minColumnWidth > 0 { maxW = max(maxW, configuration.minColumnWidth) }
-            baseColumnWidths[c] = ceil(maxW)
-        }
-
-        // 2) 行高：在确定列宽后，每行取该行所有单元格内容高度的最大值。
-        baseRowHeights = Array(repeating: 0, count: rowCount)
-        for r in 0..<rowCount {
-            var maxH: CGFloat = 0
-            for c in 0..<columnCount {
-                guard let m = model(row: r, column: c) else { continue }
-                let style = effectiveStyle(row: r, column: c)
-                maxH = max(maxH, measure(m, style: style, maxWidth: baseColumnWidths[c]).height)
-            }
-            if configuration.maxRowHeight > 0 { maxH = min(maxH, configuration.maxRowHeight) }
-            if configuration.minRowHeight > 0 { maxH = max(maxH, configuration.minRowHeight) }
-            baseRowHeights[r] = ceil(maxH)
-        }
-
+        // 复用静态计算（zoom = 1 得到原始内容尺寸）。
+        let sizes = GridTableView.calculateColumnRowSizes(rows: rows, configuration: configuration, zoom: 1)
+        baseColumnWidths = sizes.columnWidths
+        baseRowHeights = sizes.rowHeights
         // 初始展示尺寸 = 原始尺寸（拉伸在 applyStretch 中按可用尺寸计算）。
         columnWidths = baseColumnWidths
         rowHeights = baseRowHeights
@@ -610,39 +584,7 @@ public class GridTableView: UIView, UICollectionViewDataSource {
 
     /// 测量单元格内容尺寸（含内边距）。
     private func measure(_ model: GridCellModel, style: GridCellStyle, maxWidth: CGFloat) -> CGSize {
-        let insets = style.contentInsets
-
-        // 自定义视图：直接用给定内容尺寸 + 内边距。
-        if let custom = model.customViewSize {
-            var w = custom.width + insets.left + insets.right
-            if maxWidth != .greatestFiniteMagnitude { w = min(w, maxWidth) }
-            return CGSize(width: ceil(w), height: ceil(custom.height + insets.top + insets.bottom))
-        }
-
-        let textMaxWidth: CGFloat = maxWidth == .greatestFiniteMagnitude
-            ? maxWidth
-            : max(0, maxWidth - insets.left - insets.right)
-
-        let attributed = attributedString(for: model, style: style)
-        let bounding = attributed.boundingRect(
-            with: CGSize(width: textMaxWidth, height: .greatestFiniteMagnitude),
-            options: [.usesLineFragmentOrigin, .usesFontLeading],
-            context: nil)
-
-        return CGSize(width: ceil(bounding.width) + insets.left + insets.right,
-                      height: ceil(bounding.height) + insets.top + insets.bottom)
-    }
-
-    /// 生成单元格用于测量 / 显示的富文本。
-    private func attributedString(for model: GridCellModel, style: GridCellStyle) -> NSAttributedString {
-        if let attributed = model.attributedText { return attributed }
-        let paragraph = NSMutableParagraphStyle()
-        paragraph.alignment = style.textAlignment
-        return NSAttributedString(string: model.text ?? "", attributes: [
-            .font: style.font,
-            .foregroundColor: style.textColor,
-            .paragraphStyle: paragraph,
-        ])
+        GridTableView.measureCell(model, style: style, maxWidth: maxWidth)
     }
 
     // MARK: 布局
@@ -845,6 +787,140 @@ public class GridTableView: UIView, UICollectionViewDataSource {
         if !w.isFinite { w = 0 }
         if !h.isFinite { h = 0 }
         return CGSize(width: ceil(w), height: ceil(h))
+    }
+
+    // MARK: - 提前计算尺寸（无需实例化 / 加入视图层级）
+
+    /// 提前计算「网格内容」尺寸（列宽合计 × 行高合计，含分割线；不含头 / 尾视图，不裁剪 min/max）。
+    /// - Parameters:
+    ///   - rows: 二维单元格数据。
+    ///   - configuration: 表格配置。
+    ///   - zoom: 缩放系数（默认 1）。
+    public static func calculateContentSize(for rows: [[GridCellModel]],
+                                            configuration: GridTableConfiguration,
+                                            zoom: CGFloat = 1) -> CGSize {
+        let (cols, rowsH) = calculateColumnRowSizes(rows: rows, configuration: configuration, zoom: zoom)
+        let sep = configuration.separator.width
+        let w = cols.reduce(0, +) + sep * CGFloat(max(cols.count - 1, 0))
+        let h = rowsH.reduce(0, +) + sep * CGFloat(max(rowsH.count - 1, 0))
+        return CGSize(width: ceil(w), height: ceil(h))
+    }
+
+    /// 提前计算表格整体自适应尺寸（= 网格内容 + 头 / 尾视图高度，并裁剪到 min/max）。
+    /// 与实例的 `intrinsicContentSize` 结果一致，可用于「先算尺寸再布局」避免闪动。
+    /// - Parameters:
+    ///   - rows: 二维单元格数据。
+    ///   - configuration: 表格配置。
+    ///   - tableHeaderHeight: 表格头部视图高度（无则传 0）。
+    ///   - tableFooterHeight: 表格尾部视图高度（无则传 0）。
+    ///   - zoom: 缩放系数（默认 1）。
+    public static func calculateFittingSize(for rows: [[GridCellModel]],
+                                            configuration: GridTableConfiguration,
+                                            tableHeaderHeight: CGFloat = 0,
+                                            tableFooterHeight: CGFloat = 0,
+                                            zoom: CGFloat = 1) -> CGSize {
+        let (cols, rowsH) = calculateColumnRowSizes(rows: rows, configuration: configuration, zoom: zoom)
+        let sep = configuration.separator.width
+        var w = cols.reduce(0, +) + sep * CGFloat(max(cols.count - 1, 0))
+        var h = rowsH.reduce(0, +) + sep * CGFloat(max(rowsH.count - 1, 0))
+
+        // 吸顶时表头与首行之间多一条分割线间隙。
+        if configuration.stickyHeader && configuration.hasHeaderRow && !rowsH.isEmpty { h += sep }
+        h += max(tableHeaderHeight, 0) + max(tableFooterHeight, 0)
+
+        if configuration.maxTableWidth > 0 { w = min(w, configuration.maxTableWidth) }
+        if configuration.minTableWidth > 0 { w = max(w, configuration.minTableWidth) }
+        if configuration.maxTableHeight > 0 { h = min(h, configuration.maxTableHeight) }
+        if configuration.minTableHeight > 0 { h = max(h, configuration.minTableHeight) }
+
+        return CGSize(width: ceil(w), height: ceil(h))
+    }
+
+    /// 提前计算每列宽度与每行高度（提前计算的核心，纯函数）。
+    public static func calculateColumnRowSizes(rows: [[GridCellModel]],
+                                               configuration: GridTableConfiguration,
+                                               zoom: CGFloat = 1) -> (columnWidths: [CGFloat], rowHeights: [CGFloat]) {
+        let rowCount = rows.count
+        let columnCount = rows.map { $0.count }.max() ?? 0
+        guard rowCount > 0, columnCount > 0 else { return ([], []) }
+
+        func model(_ r: Int, _ c: Int) -> GridCellModel? {
+            guard r < rows.count, c < rows[r].count else { return nil }
+            return rows[r][c]
+        }
+        func style(_ r: Int, _ c: Int) -> GridCellStyle {
+            if let o = model(r, c)?.styleOverride { return o }
+            if configuration.hasHeaderRow && r == 0 { return configuration.headerStyle }
+            return configuration.cellStyle
+        }
+
+        // 1) 原始列宽（未缩放）。
+        var baseCol = Array(repeating: CGFloat(0), count: columnCount)
+        for c in 0..<columnCount {
+            var maxW: CGFloat = 0
+            for r in 0..<rowCount {
+                guard let m = model(r, c) else { continue }
+                let limit = configuration.maxColumnWidth > 0 ? configuration.maxColumnWidth : .greatestFiniteMagnitude
+                maxW = max(maxW, measureCell(m, style: style(r, c), maxWidth: limit).width)
+            }
+            if configuration.maxColumnWidth > 0 { maxW = min(maxW, configuration.maxColumnWidth) }
+            if configuration.minColumnWidth > 0 { maxW = max(maxW, configuration.minColumnWidth) }
+            baseCol[c] = ceil(maxW)
+        }
+
+        // 2) 原始行高（未缩放，用原始列宽测量）。
+        var baseRow = Array(repeating: CGFloat(0), count: rowCount)
+        for r in 0..<rowCount {
+            var maxH: CGFloat = 0
+            for c in 0..<columnCount {
+                guard let m = model(r, c) else { continue }
+                maxH = max(maxH, measureCell(m, style: style(r, c), maxWidth: baseCol[c]).height)
+            }
+            if configuration.maxRowHeight > 0 { maxH = min(maxH, configuration.maxRowHeight) }
+            if configuration.minRowHeight > 0 { maxH = max(maxH, configuration.minRowHeight) }
+            baseRow[r] = ceil(maxH)
+        }
+
+        // 3) 应用缩放。
+        if zoom == 1 { return (baseCol, baseRow) }
+        return (baseCol.map { ceil($0 * zoom) }, baseRow.map { ceil($0 * zoom) })
+    }
+
+    /// 测量单个单元格内容尺寸（含内边距）。
+    static func measureCell(_ model: GridCellModel, style: GridCellStyle, maxWidth: CGFloat) -> CGSize {
+        let insets = style.contentInsets
+
+        // 自定义视图：直接用给定内容尺寸 + 内边距。
+        if let custom = model.customViewSize {
+            var w = custom.width + insets.left + insets.right
+            if maxWidth != .greatestFiniteMagnitude { w = min(w, maxWidth) }
+            return CGSize(width: ceil(w), height: ceil(custom.height + insets.top + insets.bottom))
+        }
+
+        let textMaxWidth: CGFloat = maxWidth == .greatestFiniteMagnitude
+            ? maxWidth
+            : max(0, maxWidth - insets.left - insets.right)
+
+        let attributed = attributedForMeasure(model, style: style)
+        let bounding = attributed.boundingRect(
+            with: CGSize(width: textMaxWidth, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            context: nil)
+
+        return CGSize(width: ceil(bounding.width) + insets.left + insets.right,
+                      height: ceil(bounding.height) + insets.top + insets.bottom)
+    }
+
+    /// 生成单元格用于测量的富文本。
+    private static func attributedForMeasure(_ model: GridCellModel, style: GridCellStyle) -> NSAttributedString {
+        if let attributed = model.attributedText { return attributed }
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.alignment = style.textAlignment
+        return NSAttributedString(string: model.text ?? "", attributes: [
+            .font: style.font,
+            .foregroundColor: style.textColor,
+            .paragraphStyle: paragraph,
+        ])
     }
 
     // MARK: - UICollectionViewDataSource

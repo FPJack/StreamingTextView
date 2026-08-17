@@ -163,6 +163,14 @@ class GridTableViewController: UIViewController {
         }
 
         gridTable.setRows(rows, configuration: config)
+
+        // 演示「提前计算」：无需等待布局即可算出表格自适应尺寸（头/尾视图各 44 / 36）。
+        let preSize = GridTableView.calculateFittingSize(for: rows,
+                                                         configuration: config,
+                                                         tableHeaderHeight: 44,
+                                                         tableFooterHeight: 36)
+        print("提前计算表格尺寸：\(preSize)")
+        title = String(format: "Grid %.0f×%.0f", preSize.width, preSize.height)
     }
 
     @objc private func toggleMode() {
