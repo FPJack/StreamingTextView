@@ -42,3 +42,9 @@ fanpeng, peng.fan@ukelink.com
 ## License
 
 StreamingTextView is available under the MIT license. See the LICENSE file for more info.
+|Swift Version|Tag|
+
+| Swift 5.1 | >= 0.9.0 |
+| Swift 5.0 | >= 0.8.1 |
+| Swift 4 | >= 0.4.x |
+| Swift 3 | 0.3.x |
