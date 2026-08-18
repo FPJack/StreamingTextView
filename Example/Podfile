@@ -4,7 +4,7 @@ platform :ios, '13.0'
 
 target 'StreamingTextView_Example' do
   pod 'StreamingTextView', :path => '../'
-  pod 'Down'
+#  pod 'Down'
   pod 'SDWebImage'
   target 'StreamingTextView_Tests' do
     inherit! :search_paths
@@ -53,28 +53,28 @@ end
 #end
 
 
-post_install do |installer|
-  installer.pods_project.targets.each do |target|
-    target.build_configurations.each do |config|
-      # 关闭 Xcode 16+ 默认开启的“显式构建模块”，
-      # 修复 Down 依赖 libcmark 时报 "missing required module 'libcmark'"
-      config.build_settings['SWIFT_ENABLE_EXPLICIT_MODULES'] = 'NO'
-      config.build_settings['CLANG_ENABLE_EXPLICIT_MODULES'] = 'NO'
-    end
-  end
-
-  # 同时对主工程 target 也关闭
-  installer.aggregate_targets.each do |aggregate_target|
-    aggregate_target.user_project.native_targets.each do |target|
-      target.build_configurations.each do |config|
-        config.build_settings['SWIFT_ENABLE_EXPLICIT_MODULES'] = 'NO'
-        config.build_settings['CLANG_ENABLE_EXPLICIT_MODULES'] = 'NO'
-        # App 目标 import Down 时需要能找到 Down 序列化依赖的 libcmark 模块的 modulemap，
-        # 否则报 "missing required module 'libcmark'"。指到 cmark 源码目录（递归）。
-        config.build_settings['SWIFT_INCLUDE_PATHS'] ||= '$(inherited)'
-        config.build_settings['SWIFT_INCLUDE_PATHS'] = "#{config.build_settings['SWIFT_INCLUDE_PATHS']} \"${PODS_ROOT}/Down/Sources/cmark/**\""
-      end
-    end
-    aggregate_target.user_project.save
-  end
-end
+#post_install do |installer|
+#  installer.pods_project.targets.each do |target|
+#    target.build_configurations.each do |config|
+#      # 关闭 Xcode 16+ 默认开启的“显式构建模块”，
+#      # 修复 Down 依赖 libcmark 时报 "missing required module 'libcmark'"
+#      config.build_settings['SWIFT_ENABLE_EXPLICIT_MODULES'] = 'NO'
+#      config.build_settings['CLANG_ENABLE_EXPLICIT_MODULES'] = 'NO'
+#    end
+#  end
+#
+#  # 同时对主工程 target 也关闭
+#  installer.aggregate_targets.each do |aggregate_target|
+#    aggregate_target.user_project.native_targets.each do |target|
+#      target.build_configurations.each do |config|
+#        config.build_settings['SWIFT_ENABLE_EXPLICIT_MODULES'] = 'NO'
+#        config.build_settings['CLANG_ENABLE_EXPLICIT_MODULES'] = 'NO'
+#        # App 目标 import Down 时需要能找到 Down 序列化依赖的 libcmark 模块的 modulemap，
+#        # 否则报 "missing required module 'libcmark'"。指到 cmark 源码目录（递归）。
+#        config.build_settings['SWIFT_INCLUDE_PATHS'] ||= '$(inherited)'
+#        config.build_settings['SWIFT_INCLUDE_PATHS'] = "#{config.build_settings['SWIFT_INCLUDE_PATHS']} \"${PODS_ROOT}/Down/Sources/cmark/**\""
+#      end
+#    end
+#    aggregate_target.user_project.save
+#  end
+#end
