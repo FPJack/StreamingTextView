@@ -184,15 +184,3 @@ enum MarkdownTableParser {
     }
 }
 
-func prientMarkdown() {
-    if let path = Bundle.main.path(forResource: "Test", ofType: "md"),
-       let content = try? String(contentsOfFile: path, encoding: .utf8), !content.isEmpty {
-        let arr = MarkdownTableParser.splitMarkdownTables(content)
-        print("Markdown split into \(arr.count) segments")
-        for (index, segment) in arr.enumerated() {
-            print("---- segment \(index) ----")
-            print(segment)
-        }
-    }
-}
-

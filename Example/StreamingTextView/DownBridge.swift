@@ -213,6 +213,130 @@ public class DownBridge: NSObject {
     /// 供 Objective-C 读取图片 URL 的属性名。
     public static let imageURLAttributeName = "ZLImageURL"
 
+    // MARK: - 流式增量解析（实例）
+
+    /// 承载渲染结果的流式视图（弱引用，避免循环引用）。
+    public weak var streamingView: StreamingTextView?
+    /// 渲染配置（字号 / 颜色 / 图片宽度 / 表格配置等）。
+    public var renderOptions: MarkdownRenderOptions
+
+    /// 已累积、需保留用于「整体重新解析」的完整 markdown 原文。
+    private let accumulatedMarkdown = NSMutableString()
+    /// 当前已在 textView 上显示（揭示）的富文本字符数。
+    /// 由 streamingView 的进度回调维护，作为下次重新赋值时的「续播起点」。
+    private var displayedLength = 0
+    /// 上一次已解析渲染到的原文长度（去重，避免无变化时重复解析）。
+    private var parsedSourceLength = 0
+    /// 是否正处于一次逐字揭示中（true 时不重新解析，避免打断进行中的动画）。
+    private var isRevealing = false
+    /// 数据流是否已结束（结束后允许解析最后不足一行的尾巴）。
+    private var streamFinished = false
+
+    /// 流式揭示进度回调（已显示字符数，缓冲总字符数），供外部更新 UI / 跟随滚动。
+    public var onStreamProgress: ((_ displayed: Int, _ total: Int) -> Void)?
+
+    /// 实例化初始化：用于「分块到达的 markdown 增量流式解析」。
+    /// - Parameters:
+    ///   - streamingView: 承载渲染结果的流式视图。
+    ///   - options: 渲染配置。
+    @MainActor
+    public init(streamingView: StreamingTextView, options: MarkdownRenderOptions) {
+        self.streamingView = streamingView
+        self.renderOptions = options
+        super.init()
+        bindStreamingCallbacks()
+    }
+
+    /// 绑定 streamingView 的进度 / 完成回调：记录「已显示位置」，并在揭示完成后继续解析。
+    @MainActor
+    private func bindStreamingCallbacks() {
+        streamingView?.onProgress = { [weak self] visible, total in
+            guard let self = self else { return }
+            // textView 记录已经显示的位置。
+            self.displayedLength = visible
+            self.onStreamProgress?(visible, total)
+        }
+        streamingView?.onComplete = { [weak self] in
+            guard let self = self, let view = self.streamingView else { return }
+            self.isRevealing = false
+            self.displayedLength = view.totalLength
+            // 本轮揭示完成后，若期间累积了新内容，继续解析下一段。
+            self.renderIfIdle()
+        }
+    }
+
+    /// 追加一段 markdown 原文并触发增量流式渲染。
+    /// 内部会「拼接保留原文 → 整体重新解析 → 赋值给 textView → 从上次显示处续播」。
+    @MainActor
+    public func appendMarkdown(_ markdownChunk: String) {
+        guard !markdownChunk.isEmpty else { return }
+        accumulatedMarkdown.append(markdownChunk)
+        renderIfIdle()
+    }
+
+    /// 通知数据流结束：把最后不足一行的尾巴也解析显示出来。
+    @MainActor
+    public func finishStreaming() {
+        streamFinished = true
+        renderIfIdle()
+    }
+
+    /// 重置流式状态（清空累积原文与显示）。
+    @MainActor
+    public func resetStreaming() {
+        accumulatedMarkdown.setString("")
+        displayedLength = 0
+        parsedSourceLength = 0
+        isRevealing = false
+        streamFinished = false
+        streamingView?.reset()
+    }
+
+    /// 计算可安全解析的「已提交前缀」长度：
+    /// - 未结束时，取到最后一个换行（含）为止的完整行，避免把半行 markdown 解析成破碎文本；
+    /// - 已结束时，取全部（尾巴也解析）。
+    private func committedSourceLength() -> Int {
+        if streamFinished { return accumulatedMarkdown.length }
+        let newline = accumulatedMarkdown.range(of: "\n", options: .backwards)
+        return newline.location == NSNotFound ? 0 : newline.location + newline.length
+    }
+
+    /// 在流式空闲时：把保留的原文（已提交前缀）整体重新解析，赋值给 textView，
+    /// 并谨慎地从「上次已显示位置」继续流式打印（严格夹取下标，避免越界）。
+    @MainActor
+    private func renderIfIdle() {
+        guard !isRevealing else { return }              // 不打断进行中的揭示 / 表格动画
+        guard let view = streamingView else { return }
+
+        let committed = committedSourceLength()
+        guard committed > parsedSourceLength else { return }   // 没有新的完整内容
+        parsedSourceLength = committed
+
+        // 1) 整体重新解析保留的原文前缀，生成全新的富文本。
+        let markdown = accumulatedMarkdown.substring(to: committed)
+        let full = DownBridge.attributedString(fromMarkdown: markdown, options: renderOptions)
+            ?? NSAttributedString(string: markdown,
+                                  attributes: [.font: UIFont.systemFont(ofSize: renderOptions.fontSize)])
+
+        // 2) 谨慎处理「上一次已显示位置」：严格夹取到 [0, full.length]，避免下标越界。
+        //    （即使新一次解析后整体变短，也不会越界。）
+        let startLength = max(0, min(displayedLength, full.length))
+
+        // 3) 重新赋值富文本，并从上次已显示处继续流式打印。
+        isRevealing = true
+        view.startStreamingAttributedText(full, fromLength: startLength)
+
+        // 4) 若本次没有需要逐字揭示的新内容（startLength 已到末尾，不会触发 onComplete），
+        //    立即恢复空闲，以便后续再解析。
+        if startLength >= full.length {
+            isRevealing = false
+            displayedLength = full.length
+            onStreamProgress?(full.length, full.length)
+        }
+    }
+
+    // MARK: - 静态工具
+
     /// 创建一个使用 Down 的 `DownLayoutManager` 的 UITextView。
     /// Down 的代码块背景 / 引用竖线 / 分隔线等是自定义 block 属性，
     /// 只有 `DownLayoutManager` 才会绘制；普通 UITextView 的默认 layoutManager 不会画，
@@ -245,36 +369,30 @@ public class DownBridge: NSObject {
     public static func attributedString(fromMarkdown markdown: String,
                                         options: MarkdownRenderOptions) -> NSAttributedString? {
         let configuration = makeConfiguration(fontSize: options.fontSize, textColor: options.textColor)
-
-        // 1) 把 Markdown 拆分为「文本段」与「表格段」。
-        let segments = splitSegments(markdown)
-
+        let segments = MarkdownTableParser.parseSegments(markdown)
         // 2) 逐段渲染并拼接。
         let result = NSMutableAttributedString()
         let newlineAttrs: [NSAttributedString.Key: Any] = [.font: UIFont.systemFont(ofSize: options.fontSize)]
-
         for segment in segments {
             switch segment {
-            case .text(let md):
-                guard !md.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
-                if let parsed = try? Down(markdownString: md)
+            case .text(let text):
+                // 文本段：交给 Down 渲染。
+                guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
+                if let parsed = try? Down(markdownString: text)
                     .toAttributedString(.normalize, styler: ImageStyler(configuration: configuration)) {
                     result.append(parsed)
                 }
-            case .table(let tableRows):
-                if #available(iOS 13.0, *) {
-                    let cellModels = tableRows.map { row in row.map { GridCellModel(text: $0) } }
-                    // 优先使用外部传入的表格配置；未提供则用内部默认配置。
-                    let tableConfig = options.tableConfiguration
-                        ?? makeTableConfiguration(maxWidth: options.maxImageWidth,
-                                                  fontSize: options.fontSize,
-                                                  textColor: options.textColor)
-                    let attachment = GridTableAttachment(rows: cellModels, configuration: tableConfig)
-                    // 表格自成一块，前后补换行，保证独占段落。
-                    if result.length > 0 { result.append(NSAttributedString(string: "\n", attributes: newlineAttrs)) }
-                    result.append(NSAttributedString(attachment: attachment))
-                    result.append(NSAttributedString(string: "\n", attributes: newlineAttrs))
-                }
+            case .table(let table):
+                // 优先使用外部传入的表格配置；未提供则用内部默认配置。
+                let tableConfig = options.tableConfiguration
+                ?? makeTableConfiguration(maxWidth: options.maxImageWidth,
+                                          fontSize: options.fontSize,
+                                          textColor: options.textColor)
+                let attachment = GridTableAttachment(rows: table, configuration: tableConfig)
+                // 表格自成一块，前后补换行，保证独占段落。
+                if result.length > 0 { result.append(NSAttributedString(string: "\n", attributes: newlineAttrs)) }
+                result.append(NSAttributedString(attachment: attachment))
+                result.append(NSAttributedString(string: "\n", attributes: newlineAttrs))
             }
         }
 
@@ -344,13 +462,7 @@ public class DownBridge: NSObject {
                                        codeBlockOptions: codeBlockOptions)
     }
 
-    // MARK: - Markdown 表格检测 / 解析
-
-    /// Markdown 分段结果。
-    private enum MarkdownSegment {
-        case text(String)
-        case table([[String]])
-    }
+    // MARK: - 表格配置
 
     /// 表格配置（用于聊天气泡内展示：限制最大宽度、可横向滑动、蓝底表头）。
     @available(iOS 13.0, *)
@@ -382,81 +494,7 @@ public class DownBridge: NSObject {
         return config
     }
 
-    /// 把 Markdown 按行扫描，拆分为文本段与表格段（表格 = 表头行 + 分隔行 + 若干数据行）。
-    private static func splitSegments(_ markdown: String) -> [MarkdownSegment] {
-        let lines = markdown.components(separatedBy: "\n")
-        var segments: [MarkdownSegment] = []
-        var textBuffer: [String] = []
-
-        func flushText() {
-            if !textBuffer.isEmpty {
-                segments.append(.text(textBuffer.joined(separator: "\n")))
-                textBuffer.removeAll()
-            }
-        }
-
-        var i = 0
-        while i < lines.count {
-            // 表格起点：当前行是表格行，且下一行是分隔行（| --- | --- |）。
-            if i + 1 < lines.count, isTableRow(lines[i]), isSeparatorRow(lines[i + 1]) {
-                var tableLines = [lines[i], lines[i + 1]]
-                var j = i + 2
-                while j < lines.count, isTableRow(lines[j]) {
-                    tableLines.append(lines[j])
-                    j += 1
-                }
-                flushText()
-                segments.append(.table(parseTable(tableLines)))
-                i = j
-            } else {
-                textBuffer.append(lines[i])
-                i += 1
-            }
-        }
-        flushText()
-        return segments
-    }
-
-    /// 是否为表格行（去空白后含 `|` 且非空）。
-    private static func isTableRow(_ line: String) -> Bool {
-        let t = line.trimmingCharacters(in: .whitespaces)
-        return !t.isEmpty && t.contains("|")
-    }
-
-    /// 是否为分隔行（每个单元格形如 `---` / `:--` / `--:` / `:-:`）。
-    private static func isSeparatorRow(_ line: String) -> Bool {
-        let cells = splitCells(line)
-        guard !cells.isEmpty else { return false }
-        for c in cells {
-            let t = c.trimmingCharacters(in: .whitespaces)
-            if t.isEmpty { return false }
-            if t.range(of: "^:?-+:?$", options: .regularExpression) == nil { return false }
-        }
-        return true
-    }
-
-    /// 把一行拆成单元格：去掉首尾 `|` 后按 `|` 分割并 trim。
-    private static func splitCells(_ line: String) -> [String] {
-        var t = line.trimmingCharacters(in: .whitespaces)
-        if t.hasPrefix("|") { t.removeFirst() }
-        if t.hasSuffix("|") { t.removeLast() }
-        return t.components(separatedBy: "|").map { $0.trimmingCharacters(in: .whitespaces) }
-    }
-
-    /// 解析表格：第 0 行表头，第 1 行分隔（跳过），其余为数据行；列数对齐到表头。
-    private static func parseTable(_ lines: [String]) -> [[String]] {
-        guard lines.count >= 2 else { return [] }
-        let header = splitCells(lines[0])
-        var rows: [[String]] = [header]
-        let colCount = header.count
-        for k in 2..<lines.count {
-            var cells = splitCells(lines[k])
-            if cells.count < colCount { cells += Array(repeating: "", count: colCount - cells.count) }
-            if cells.count > colCount { cells = Array(cells.prefix(colCount)) }
-            rows.append(cells)
-        }
-        return rows
-    }
+    // MARK: - 图片处理
 
     /// 处理富文本中的图片：把图片占位附件替换为会自下载的 `ImageTextAttachment`
     /// 并触发下载。每当有图片下载完成，会回调 `onImageLoaded(range)`，外部据此刷新
@@ -524,7 +562,7 @@ public class DownBridge: NSObject {
     /// 用于多图预览时左右滑动浏览。
     /// - Parameter textView: 承载富文本的 UITextView。
     /// - Returns: 顺序排列的图片附件数组。
-    public static func imageAttachments(in textView: UITextView) -> [ImageTextAttachment] {
+    @MainActor public static func imageAttachments(in textView: UITextView) -> [ImageTextAttachment] {
         var result: [ImageTextAttachment] = []
         let storage = textView.textStorage
         let fullRange = NSRange(location: 0, length: storage.length)
@@ -535,6 +573,8 @@ public class DownBridge: NSObject {
         }
         return result
     }
+
+    // MARK: - AST 调试
 
     /// 递归遍历并打印 AST。
     /// - Parameters:

@@ -34,7 +34,6 @@ class ChatViewController: UIViewController,  @MainActor StreamingTextViewDelegat
         navigationItem.rightBarButtonItem = UIBarButtonItem(title: "Regenerate", style: .plain,
                                                             target: self, action: #selector(startStreaming))
         setupUI()
-        prientMarkdown()
         
     }
 
