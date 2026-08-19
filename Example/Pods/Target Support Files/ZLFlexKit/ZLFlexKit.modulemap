@@ -1,0 +1,6 @@
+framework module ZLFlexKit {
+  umbrella header "ZLFlexKit-umbrella.h"
+
+  export *
+  module * { export * }
+}

@@ -8,16 +8,19 @@ PODS:
     - SDWebImage/Core (= 5.21.7)
   - SDWebImage/Core (5.21.7)
   - StreamingTextView (0.1.0)
+  - ZLFlexKit (0.1.8)
 
 DEPENDENCIES:
   - FBSnapshotTestCase (~> 2.1.4)
   - SDWebImage
   - StreamingTextView (from `../`)
+  - ZLFlexKit
 
 SPEC REPOS:
   trunk:
     - FBSnapshotTestCase
     - SDWebImage
+    - ZLFlexKit
 
 EXTERNAL SOURCES:
   StreamingTextView:
@@ -27,7 +30,8 @@ SPEC CHECKSUMS:
   FBSnapshotTestCase: 094f9f314decbabe373b87cc339bea235a63e07a
   SDWebImage: e9fc87c1aab89a8ab1bbd74eba378c6f53be8abf
   StreamingTextView: 76584edaccf9cf62f865a43070aca1b50f42f960
+  ZLFlexKit: 1d0320448e1ee07ac4a73d895ecc5dfb2aadac41
 
-PODFILE CHECKSUM: c6cab6601cbcc5df85d04f80befe0a81f4c7e928
+PODFILE CHECKSUM: 96e022412286e241fae608ade4a18ecdd8f8e053
 
 COCOAPODS: 1.16.2
