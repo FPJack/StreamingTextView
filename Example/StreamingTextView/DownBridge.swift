@@ -213,6 +213,129 @@ public class DownBridge: NSObject {
     /// 供 Objective-C 读取图片 URL 的属性名。
     public static let imageURLAttributeName = "ZLImageURL"
 
+    // MARK: - 流式增量解析（实例）
+    /// 承载渲染结果的流式视图（弱引用，避免循环引用）。
+    public weak var streamingView: StreamingTextView?
+    /// 渲染配置（字号 / 颜色 / 图片宽度 / 表格配置等）。
+    public var renderOptions: MarkdownRenderOptions
+
+    /// 已累积、需保留用于「整体重新解析」的完整 markdown 原文。
+    private let accumulatedMarkdown = NSMutableString()
+    /// 当前已在 textView 上显示（揭示）的富文本字符数。
+    /// 由 streamingView 的进度回调维护，作为下次重新赋值时的「续播起点」。
+    private var displayedLength = 0
+    /// 上一次已解析渲染到的原文长度（去重，避免无变化时重复解析）。
+    private var parsedSourceLength = 0
+    /// 是否正处于一次逐字揭示中（true 时不重新解析，避免打断进行中的动画）。
+    private var isRevealing = false
+    /// 数据流是否已结束（结束后允许解析最后不足一行的尾巴）。
+    private var streamFinished = false
+
+    /// 流式揭示进度回调（已显示字符数，缓冲总字符数），供外部更新 UI / 跟随滚动。
+    public var onStreamProgress: ((_ displayed: Int, _ total: Int) -> Void)?
+
+    /// 实例化初始化：用于「分块到达的 markdown 增量流式解析」。
+    /// - Parameters:
+    ///   - streamingView: 承载渲染结果的流式视图。
+    ///   - options: 渲染配置。
+    @MainActor
+    public init(streamingView: StreamingTextView, options: MarkdownRenderOptions) {
+        self.streamingView = streamingView
+        self.renderOptions = options
+        super.init()
+        bindStreamingCallbacks()
+    }
+
+    /// 绑定 streamingView 的进度 / 完成回调：记录「已显示位置」，并在揭示完成后继续解析。
+    @MainActor
+    private func bindStreamingCallbacks() {
+        streamingView?.onProgress = { [weak self] visible, total in
+            guard let self = self else { return }
+            // textView 记录已经显示的位置。
+            self.displayedLength = visible
+            self.onStreamProgress?(visible, total)
+        }
+        streamingView?.onComplete = { [weak self] in
+            guard let self = self, let view = self.streamingView else { return }
+            self.isRevealing = false
+            self.displayedLength = view.totalLength
+            // 本轮揭示完成后，若期间累积了新内容，继续解析下一段。
+            self.renderIfIdle()
+        }
+    }
+
+    /// 追加一段 markdown 原文并触发增量流式渲染。
+    /// 内部会「拼接保留原文 → 整体重新解析 → 赋值给 textView → 从上次显示处续播」。
+    @MainActor
+    public func appendMarkdown(_ markdownChunk: String) {
+        guard !markdownChunk.isEmpty else { return }
+        accumulatedMarkdown.append(markdownChunk)
+        renderIfIdle()
+    }
+
+    /// 通知数据流结束：把最后不足一行的尾巴也解析显示出来。
+    @MainActor
+    public func finishStreaming() {
+        streamFinished = true
+        renderIfIdle()
+    }
+
+    /// 重置流式状态（清空累积原文与显示）。
+    @MainActor
+    public func resetStreaming() {
+        accumulatedMarkdown.setString("")
+        displayedLength = 0
+        parsedSourceLength = 0
+        isRevealing = false
+        streamFinished = false
+        streamingView?.reset()
+    }
+
+    /// 计算可安全解析的「已提交前缀」长度：
+    /// - 未结束时，取到最后一个换行（含）为止的完整行，避免把半行 markdown 解析成破碎文本；
+    /// - 已结束时，取全部（尾巴也解析）。
+    private func committedSourceLength() -> Int {
+        if streamFinished { return accumulatedMarkdown.length }
+        let newline = accumulatedMarkdown.range(of: "\n", options: .backwards)
+        return newline.location == NSNotFound ? 0 : newline.location + newline.length
+    }
+
+    /// 在流式空闲时：把保留的原文（已提交前缀）整体重新解析，赋值给 textView，
+    /// 并谨慎地从「上次已显示位置」继续流式打印（严格夹取下标，避免越界）。
+    @MainActor
+    private func renderIfIdle() {
+        guard !isRevealing else { return }              // 不打断进行中的揭示 / 表格动画
+        guard let view = streamingView else { return }
+
+        let committed = committedSourceLength()
+        guard committed > parsedSourceLength else { return }   // 没有新的完整内容
+        parsedSourceLength = committed
+
+        // 1) 整体重新解析保留的原文前缀，生成全新的富文本。
+        let markdown = accumulatedMarkdown.substring(to: committed)
+        let full = DownBridge.attributedString(fromMarkdown: markdown, options: renderOptions)
+            ?? NSAttributedString(string: markdown,
+                                  attributes: [.font: UIFont.systemFont(ofSize: renderOptions.fontSize)])
+
+        // 2) 谨慎处理「上一次已显示位置」：严格夹取到 [0, full.length]，避免下标越界。
+        //    （即使新一次解析后整体变短，也不会越界。）
+        let startLength = max(0, min(displayedLength, full.length))
+
+        // 3) 重新赋值富文本，并从上次已显示处继续流式打印。
+        isRevealing = true
+        view.startStreamingAttributedText(full, fromLength: startLength)
+
+        // 4) 若本次没有需要逐字揭示的新内容（startLength 已到末尾，不会触发 onComplete），
+        //    立即恢复空闲，以便后续再解析。
+        if startLength >= full.length {
+            isRevealing = false
+            displayedLength = full.length
+            onStreamProgress?(full.length, full.length)
+        }
+    }
+
+    // MARK: - 静态工具
+
     /// 创建一个使用 Down 的 `DownLayoutManager` 的 UITextView。
     /// Down 的代码块背景 / 引用竖线 / 分隔线等是自定义 block 属性，
     /// 只有 `DownLayoutManager` 才会绘制；普通 UITextView 的默认 layoutManager 不会画，
@@ -524,7 +647,7 @@ public class DownBridge: NSObject {
     /// 用于多图预览时左右滑动浏览。
     /// - Parameter textView: 承载富文本的 UITextView。
     /// - Returns: 顺序排列的图片附件数组。
-    public static func imageAttachments(in textView: UITextView) -> [ImageTextAttachment] {
+    @MainActor public static func imageAttachments(in textView: UITextView) -> [ImageTextAttachment] {
         var result: [ImageTextAttachment] = []
         let storage = textView.textStorage
         let fullRange = NSRange(location: 0, length: storage.length)
