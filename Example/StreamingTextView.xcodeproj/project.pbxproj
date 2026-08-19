@@ -16,6 +16,7 @@
 		607FACE01AFB9204008FA782 /* LaunchScreen.xib in Resources */ = {isa = PBXBuildFile; fileRef = 607FACDE1AFB9204008FA782 /* LaunchScreen.xib */; };
 		607FACEC1AFB9204008FA782 /* Tests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 607FACEB1AFB9204008FA782 /* Tests.swift */; };
 		848A37AB3033ED9E00BEBFB4 /* Down in Frameworks */ = {isa = PBXBuildFile; productRef = 848A37AA3033ED9E00BEBFB4 /* Down */; };
+		84AE72613035A4110083BBB6 /* MarkdownTableParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84AE72603035A4110083BBB6 /* MarkdownTableParser.swift */; };
 		84DC5719302EE9F700A48AD7 /* READMETest.md in Resources */ = {isa = PBXBuildFile; fileRef = 84DC5716302EE9F700A48AD7 /* READMETest.md */; };
 		84DC571A302EE9F700A48AD7 /* Test.md in Resources */ = {isa = PBXBuildFile; fileRef = 84DC5718302EE9F700A48AD7 /* Test.md */; };
 		84DC571B302EE9F700A48AD7 /* ChatViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84DC5714302EE9F700A48AD7 /* ChatViewController.swift */; };
@@ -52,6 +53,7 @@
 		607FACE51AFB9204008FA782 /* StreamingTextView_Tests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = StreamingTextView_Tests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		607FACEA1AFB9204008FA782 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		607FACEB1AFB9204008FA782 /* Tests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Tests.swift; sourceTree = "<group>"; };
+		84AE72603035A4110083BBB6 /* MarkdownTableParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownTableParser.swift; sourceTree = "<group>"; };
 		84DC5714302EE9F700A48AD7 /* ChatViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatViewController.swift; sourceTree = "<group>"; };
 		84DC5715302EE9F700A48AD7 /* DownBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownBridge.swift; sourceTree = "<group>"; };
 		84DC5716302EE9F700A48AD7 /* READMETest.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = READMETest.md; sourceTree = "<group>"; };
@@ -127,6 +129,7 @@
 				607FACD51AFB9204008FA782 /* AppDelegate.swift */,
 				607FACD71AFB9204008FA782 /* ViewController.swift */,
 				84DC5714302EE9F700A48AD7 /* ChatViewController.swift */,
+				84AE72603035A4110083BBB6 /* MarkdownTableParser.swift */,
 				84DC5715302EE9F700A48AD7 /* DownBridge.swift */,
 				84DC5730302EE9F700A48AD7 /* TextTapGesture.swift */,
 				84DC5732302EE9F700A48AD7 /* ImagePreviewer.swift */,
@@ -398,6 +401,7 @@
 				84DC5733302EE9F700A48AD7 /* ImagePreviewer.swift in Sources */,
 				84DC571D302EE9F700A48AD7 /* TableStreamViewController.swift in Sources */,
 				84DC5740302EE9F700A48AD7 /* GridTableViewController.swift in Sources */,
+				84AE72613035A4110083BBB6 /* MarkdownTableParser.swift in Sources */,
 				84DC5721302EEA8500A48AD7 /* TestObj.m in Sources */,
 				607FACD81AFB9204008FA782 /* ViewController.swift in Sources */,
 				607FACD61AFB9204008FA782 /* AppDelegate.swift in Sources */,

@@ -34,6 +34,8 @@ class ChatViewController: UIViewController,  @MainActor StreamingTextViewDelegat
         navigationItem.rightBarButtonItem = UIBarButtonItem(title: "Regenerate", style: .plain,
                                                             target: self, action: #selector(startStreaming))
         setupUI()
+        prientMarkdown()
+        
     }
 
     override func viewDidAppear(_ animated: Bool) {
@@ -156,6 +158,7 @@ class ChatViewController: UIViewController,  @MainActor StreamingTextViewDelegat
            let content = try? String(contentsOfFile: path, encoding: .utf8), !content.isEmpty {
             return content
         }
+        
         return "# Test.md 未找到"
     }
 
@@ -255,3 +258,5 @@ class ChatViewController: UIViewController,  @MainActor StreamingTextViewDelegat
         }
     }
 }
+
+
