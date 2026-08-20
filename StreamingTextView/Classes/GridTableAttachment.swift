@@ -40,7 +40,8 @@ public class GridTableAttachment: NSTextAttachment, StreamingBlockAttachment {
         self.fullSize = GridTableView.calculateFittingSize(for: rows, configuration: configuration)
         super.init(data: nil, ofType: nil)
         // 初始高度为 0（宽度按完整宽度预留），随表格逐行流式增长。
-        self.bounds = CGRect(x: 0, y: 0, width: fullSize.width, height: 0)
+        ///不然会莫名其妙卡住
+        self.bounds = CGRect(x: 0, y: 0, width: 0, height: 0)
     }
 
     public required init?(coder: NSCoder) {
@@ -48,18 +49,18 @@ public class GridTableAttachment: NSTextAttachment, StreamingBlockAttachment {
     }
 
     /// 附件本身不绘制任何内容（真正的表格由覆盖视图展示），返回透明占位图以稳定排版空间。
-    public override func image(forBounds imageBounds: CGRect,
-                               textContainer: NSTextContainer?,
-                               characterIndex charIndex: Int) -> UIImage? {
-        return GridTableAttachment.transparentImage(of: imageBounds.size)
-    }
-
-    private static func transparentImage(of size: CGSize) -> UIImage? {
-        guard size.width > 0, size.height > 0 else { return nil }
-        let format = UIGraphicsImageRendererFormat.default()
-        format.opaque = false
-        return UIGraphicsImageRenderer(size: size, format: format).image { _ in }
-    }
+//    public override func image(forBounds imageBounds: CGRect,
+//                               textContainer: NSTextContainer?,
+//                               characterIndex charIndex: Int) -> UIImage? {
+//        return GridTableAttachment.transparentImage(of: imageBounds.size)
+//    }
+//
+//    private static func transparentImage(of size: CGSize) -> UIImage? {
+//        guard size.width > 0, size.height > 0 else { return nil }
+//        let format = UIGraphicsImageRendererFormat.default()
+//        format.opaque = false
+//        return UIGraphicsImageRenderer(size: size, format: format).image { _ in }
+//    }
 
     private func makeTable() -> GridTableView {
         let table = GridTableView()

@@ -271,7 +271,15 @@ public class DownBridge: NSObject {
     public func appendMarkdown(_ markdownChunk: String) {
         guard !markdownChunk.isEmpty else { return }
         accumulatedMarkdown.append(markdownChunk)
+        if markdownChunk.contains("\n| --- |") {
+            NSLog("Appended markdown chunk: \\n| --- |\\n");
+        }
+        NSLog("Appended markdown chunk: start %@", markdownChunk);
+
         renderIfIdle()
+      
+        NSLog("Appended markdown chunk: end%@", markdownChunk);
+        
     }
 
     /// 通知数据流结束：把最后不足一行的尾巴也解析显示出来。
@@ -305,7 +313,10 @@ public class DownBridge: NSObject {
     /// 并谨慎地从「上次已显示位置」继续流式打印（严格夹取下标，避免越界）。
     @MainActor
     private func renderIfIdle() {
-        guard !isRevealing else { return }              // 不打断进行中的揭示 / 表格动画
+        guard !isRevealing else {
+            print("DownBridge: renderIfIdle() skipped because isRevealing == true")
+            return
+        }              // 不打断进行中的揭示 / 表格动画
         guard let view = streamingView else { return }
 
         let committed = committedSourceLength()
