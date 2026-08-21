@@ -526,7 +526,6 @@ public class StreamingTextView: UIView {
         // 防止把 NaN / 无穷大 传给 Auto Layout（会直接崩溃）。
         if !w.isFinite { w = 0 }
         if !h.isFinite { h = 0 }
-        
         return CGSize(width: w, height: h)
     }
 

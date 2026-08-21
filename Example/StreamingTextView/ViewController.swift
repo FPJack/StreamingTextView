@@ -73,7 +73,9 @@ class ViewController: UIViewController, @MainActor StreamingTextViewDelegate {
         let offsetButton = button(title: "Start From Offset", action: #selector(onStartFromOffset))
         let tableButton = button(title: "TableView Streaming", action: #selector(onOpenTableStream))
         let gridButton = button(title: "Grid Table (Compositional)", action: #selector(onOpenGridTable))
-        let chunkButton = button(title: "Chunked Markdown (分块读取)", action: #selector(onOpenChunkedMarkdown))
+        
+        let chunkBtn = button(title: "chunk", action: #selector(chunktable))
+
 
         let row1 = UIStackView(arrangedSubviews: [plainButton, richButton, streamButton])
         row1.axis = .horizontal
@@ -85,7 +87,9 @@ class ViewController: UIViewController, @MainActor StreamingTextViewDelegate {
         row2.distribution = .fillEqually
         row2.spacing = 12
 
-        let stack = UIStackView(arrangedSubviews: [row1, row2, chatButton, sizeButton, offsetButton, tableButton, gridButton, chunkButton])
+        let codeBlockButton = button(title: "CodeBlockView (行号+代码)", action: #selector(onOpenCodeBlock))
+
+        let stack = UIStackView(arrangedSubviews: [row1, row2, chatButton, sizeButton, offsetButton, tableButton, gridButton, chunkBtn, codeBlockButton])
         stack.axis = .vertical
         stack.spacing = 12
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -218,15 +222,29 @@ class ViewController: UIViewController, @MainActor StreamingTextViewDelegate {
             }
         }
     }
+    @objc private func onOpenCodeBlock() {
+        if #available(iOS 13.0, *) {
+            let vc = CodeBlockDemoViewController()
+            if let nav = navigationController {
+                nav.pushViewController(vc, animated: true)
+            } else {
+                let nav = UINavigationController(rootViewController: vc)
+                nav.modalPresentationStyle = .fullScreen
+                present(nav, animated: true)
+            }
+        }
+    }
 
-    @objc private func onOpenChunkedMarkdown() {
-        let vc = ChunkedMarkdownViewController()
-        if let nav = navigationController {
-            nav.pushViewController(vc, animated: true)
-        } else {
-            let nav = UINavigationController(rootViewController: vc)
-            nav.modalPresentationStyle = .fullScreen
-            present(nav, animated: true)
+    @objc private func chunktable() {
+        if #available(iOS 13.0, *) {
+            let vc = ChunkedMarkdownViewController()
+            if let nav = navigationController {
+                nav.pushViewController(vc, animated: true)
+            } else {
+                let nav = UINavigationController(rootViewController: vc)
+                nav.modalPresentationStyle = .fullScreen
+                present(nav, animated: true)
+            }
         }
     }
 
