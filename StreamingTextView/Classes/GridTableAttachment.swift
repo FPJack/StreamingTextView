@@ -40,7 +40,7 @@ public class GridTableAttachment: NSTextAttachment, StreamingBlockAttachment {
         self.fullSize = GridTableView.calculateFittingSize(for: rows, configuration: configuration)
         super.init(data: nil, ofType: nil)
         // 初始高度为 0（宽度按完整宽度预留），随表格逐行流式增长。
-        self.bounds = CGRect(x: 0, y: 0, width: fullSize.width, height: 0)
+        self.bounds = CGRect(x: 0, y: 0, width: 0, height: 0)
     }
 
     public required init?(coder: NSCoder) {

@@ -11,7 +11,7 @@ import UIKit
 import Down
 import SDWebImage
 import StreamingTextView
-
+import Splash
 /// 自定义 NSTextAttachment：内部用 SDWebImage 下载网络图片，
 /// 下载完成后自动更新自身 image / bounds，并回调通知外部刷新 UI。
 @objcMembers
@@ -111,6 +111,14 @@ public class ImageStyler: DownStyler {
             str.addAttribute(.foregroundColor, value: colors.code, range: range)
             str.addAttribute(.backgroundColor, value: inlineCodeBackground, range: range)
         }
+    }
+    public override func style(codeBlock str: NSMutableAttributedString, fenceInfo: String?) {
+        super.style(codeBlock: str, fenceInfo: fenceInfo)
+        ///通过splash解析代码高亮
+        let code = str.string
+        let highlighter = SyntaxHighlighter(format: AttributedStringOutputFormat(theme: .sunset(withFont: Font(size: 14))))
+        let highlightedCode = highlighter.highlight(code)
+        str.setAttributedString(highlightedCode)
     }
 
     public override func style(image str: NSMutableAttributedString, title: String?, url: String?) {
