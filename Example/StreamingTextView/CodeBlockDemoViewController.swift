@@ -8,6 +8,7 @@
 
 import UIKit
 import StreamingTextView
+import Splash
 
 @available(iOS 13.0, *)
 final class CodeBlockDemoViewController: UIViewController {
@@ -188,10 +189,28 @@ final class CodeBlockDemoViewController: UIViewController {
             dismiss(animated: true)
         }
     }
+    
+    private static func readmeMarkdown() -> String {
+        if let path = Bundle.main.path(forResource: "code", ofType: "md"),
+           let content = try? String(contentsOfFile: path, encoding: .utf8), !content.isEmpty {
+            return content
+        }
+        return "# Test.md 未找到"
+    }
 
     // MARK: - 示例代码富文本（简单着色）
 
+     static func code() -> NSAttributedString {
+        let code = readmeMarkdown()
+        ///通过splash解析代码高亮
+        let highlighter = SyntaxHighlighter(format: AttributedStringOutputFormat(theme: .sunset(withFont: Font(size: 14))))
+        let highlightedCode = highlighter.highlight(code)
+        return highlightedCode
+    }
+
+    
     private static func sampleCode() -> NSAttributedString {
+        return code()
         let lines: [String] = [
             "import UIKit",
             "",

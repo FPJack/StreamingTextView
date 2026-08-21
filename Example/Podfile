@@ -5,7 +5,7 @@ platform :ios, '13.0'
 target 'StreamingTextView_Example' do
   pod 'StreamingTextView', :path => '../'
   pod 'SDWebImage'
-  pod 'Down'
+#  pod 'Down'
 
   target 'StreamingTextView_Tests' do
     inherit! :search_paths

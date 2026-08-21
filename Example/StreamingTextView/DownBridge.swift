@@ -112,13 +112,72 @@ public class ImageStyler: DownStyler {
             str.addAttribute(.backgroundColor, value: inlineCodeBackground, range: range)
         }
     }
+    /// 代码块渲染参数（由 `DownBridge` 构建 styler 时注入）：
+    /// 用于把 Markdown 围栏代码块渲染成自定义「代码块视图」附件（`CodeBlockAttachment`）。
+    public var codeBlockMaxWidth: CGFloat = 0
+    public var codeBlockFontSize: CGFloat = 16
+    public var codeBlockTextColor: UIColor = UIColor(white: 0.15, alpha: 1.0)
+
+    /// 重写代码块样式：用自定义「代码块视图」附件（左侧行号 + 右侧代码 + 头部语言/复制按钮）
+    /// 替换 Down 默认的代码块渲染。检测出语言时头部展示语言名，否则展示默认「代码」文字。
     public override func style(codeBlock str: NSMutableAttributedString, fenceInfo: String?) {
-        super.style(codeBlock: str, fenceInfo: fenceInfo)
-        ///通过splash解析代码高亮
-        let code = str.string
-        let highlighter = SyntaxHighlighter(format: AttributedStringOutputFormat(theme: .sunset(withFont: Font(size: 14))))
-        let highlightedCode = highlighter.highlight(code)
-        str.setAttributedString(highlightedCode)
+        if #available(iOS 13.0, *) {
+            // 取代码原文，去掉尾部多余换行，避免多出一个空行号。
+            var code = str.string
+            while code.hasSuffix("\n") {
+                code.removeLast()
+            }
+
+            let language = CodeBlockAttachment.detectLanguage(fromInfoString: fenceInfo)
+            let highlighted = ImageStyler.highlightedCode(code,
+                                                          language: language,
+                                                          fontSize: codeBlockFontSize,
+                                                          textColor: codeBlockTextColor)
+            var config = CodeBlockConfiguration()
+            config.maxWidth = codeBlockMaxWidth
+            config.codeFont = UIFont(name: "Menlo", size: codeBlockFontSize - 1)
+                ?? .systemFont(ofSize: codeBlockFontSize - 1)
+            config.lineNumberFont = config.codeFont
+            
+            
+            let attachment = CodeBlockAttachment(code: highlighted,
+                                                 language: language,
+                                                 configuration: config)
+            str.setAttributedString(NSMutableAttributedString(attachment: attachment))
+            ///再加个换行符号
+            str.append(NSAttributedString(string: "\n"))
+        } else {
+            super.style(codeBlock: str, fenceInfo: fenceInfo)
+        }
+    }
+
+    /// 对代码做语法高亮：Swift 用 Splash 着色（浅色主题），其它 / 未知语言退化为纯等宽文本。
+    private static func highlightedCode(_ code: String,
+                                        language: String?,
+                                        fontSize: CGFloat,
+                                        textColor: UIColor) -> NSAttributedString {
+        let monoFont = UIFont(name: "Menlo", size: fontSize - 1) ?? .systemFont(ofSize: fontSize - 1)
+        let plain = NSAttributedString(string: code, attributes: [.font: monoFont, .foregroundColor: textColor])
+
+        guard language?.lowercased() == "swift" else { return plain }
+
+        let theme = Theme(font: Splash.Font(size: Double(fontSize - 1)),
+                          plainTextColor: textColor,
+                          tokenColors: [
+                            .keyword: UIColor.systemPink,
+                            .string: UIColor.systemRed,
+                            .type: UIColor(red: 0.4, green: 0.2, blue: 0.7, alpha: 1),
+                            .call: UIColor.systemBlue,
+                            .number: UIColor.systemOrange,
+                            .comment: UIColor(red: 0.3, green: 0.6, blue: 0.3, alpha: 1),
+                            .property: UIColor.systemTeal,
+                            .dotAccess: UIColor.systemBlue,
+                            .preprocessing: UIColor.systemBrown
+                          ],
+                          backgroundColor: .clear)
+        let highlighter = SyntaxHighlighter(format: AttributedStringOutputFormat(theme: theme))
+        let highlighted = highlighter.highlight(code)
+        return highlighted.length > 0 ? highlighted : plain
     }
 
     public override func style(image str: NSMutableAttributedString, title: String?, url: String?) {
@@ -377,31 +436,36 @@ public class DownBridge: NSObject {
                                         options: MarkdownRenderOptions) -> NSAttributedString? {
         let configuration = makeConfiguration(fontSize: options.fontSize, textColor: options.textColor)
 
-        // 1) 把 Markdown 拆分为「文本段」与「表格段」。
-        let segments = splitSegments(markdown)
-
-        // 2) 逐段渲染并拼接。
+        // 结果富文本 & 通用换行属性。
         let result = NSMutableAttributedString()
         let newlineAttrs: [NSAttributedString.Key: Any] = [.font: UIFont.systemFont(ofSize: options.fontSize)]
 
-        for segment in segments {
+        // 构建 styler：注入代码块渲染参数，让围栏代码块渲染成自定义「代码块视图」附件。
+        func makeStyler() -> ImageStyler {
+            let styler = ImageStyler(configuration: configuration)
+            styler.codeBlockMaxWidth = options.maxImageWidth
+            styler.codeBlockFontSize = options.fontSize
+            styler.codeBlockTextColor = options.textColor
+            return styler
+        }
+
+        // 1) 拆分为「文本段」与「表格段」；文本段交给 Down（代码块由 styler 转成自定义视图）。
+        for segment in splitSegments(markdown) {
             switch segment {
             case .text(let md):
                 guard !md.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
                 if let parsed = try? Down(markdownString: md)
-                    .toAttributedString(.normalize, styler: ImageStyler(configuration: configuration)) {
+                    .toAttributedString(.normalize, styler: makeStyler()) {
                     result.append(parsed)
                 }
             case .table(let tableRows):
                 if #available(iOS 13.0, *) {
                     let cellModels = tableRows.map { row in row.map { GridCellModel(text: $0) } }
-                    // 优先使用外部传入的表格配置；未提供则用内部默认配置。
                     let tableConfig = options.tableConfiguration
                         ?? makeTableConfiguration(maxWidth: options.maxImageWidth,
                                                   fontSize: options.fontSize,
                                                   textColor: options.textColor)
                     let attachment = GridTableAttachment(rows: cellModels, configuration: tableConfig)
-                    // 表格自成一块，前后补换行，保证独占段落。
                     if result.length > 0 { result.append(NSAttributedString(string: "\n", attributes: newlineAttrs)) }
                     result.append(NSAttributedString(attachment: attachment))
                     result.append(NSAttributedString(string: "\n", attributes: newlineAttrs))

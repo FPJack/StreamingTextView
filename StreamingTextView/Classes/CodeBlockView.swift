@@ -438,75 +438,322 @@ public class CodeBlockView: UIView {
 
     // MARK: - 度量核心
 
-    private static func measure(attributedText: NSAttributedString?,
-                                style: CodeBlockStyle,
-                                availableWidth: CGFloat) -> CodeBlockMetrics {
-        var metrics = CodeBlockMetrics()
-        guard let full = attributedText, full.length >= 0 else { return metrics }
+//    private static func measure(attributedText: NSAttributedString?,
+//                                style: CodeBlockStyle,
+//                                availableWidth: CGFloat) -> CodeBlockMetrics {
+//        var metrics = CodeBlockMetrics()
+//        guard let full = attributedText, full.length >= 0 else { return metrics }
+//
+//        // 1) 按 `\n` 拆行（与换行符一一对应；末尾若有 \n 会多出一空行）。
+//        let ns = full.string as NSString
+//        var ranges: [NSRange] = []
+//        var lineStart = 0
+//        let newline: unichar = 10 // \n
+//        for i in 0..<ns.length {
+//            if ns.character(at: i) == newline {
+//                ranges.append(NSRange(location: lineStart, length: i - lineStart))
+//                lineStart = i + 1
+//            }
+//        }
+//        ranges.append(NSRange(location: lineStart, length: ns.length - lineStart))
+//
+//        // 2) 行号栏宽度（按最大行号字符串宽度）。行号数量 = 换行符数 + 1，不受换行影响。
+//        let lineCount = ranges.count
+//        var gutterWidth: CGFloat = 0
+//        if style.showsLineNumbers {
+//            let maxNumberString = "\(max(1, lineCount))" as NSString
+//            let numberSize = maxNumberString.size(withAttributes: [.font: style.lineNumberFont])
+//            gutterWidth = ceil(numberSize.width) + 2 * style.gutterHPadding
+//        }
+//
+//        // 3) 决定「换行宽度」：
+//        //    - 允许水平滚动：按 maxCellWidth 换行（未设则不换行，长行改为水平滚动）；
+//        //    - 不允许水平滚动：必须在代码区可用宽度内把整行换行展示完整
+//        //      （行高随内容增大，但行号仍只按 `\n` 计数，不增加）。
+//        let codeInnerAvailable: CGFloat = availableWidth.isFinite
+//            ? max(1, availableWidth - gutterWidth - 2 * style.cellHPadding)
+//            : .greatestFiniteMagnitude
+//        let maxCellInner: CGFloat = style.maxCellWidth > 0
+//            ? max(1, style.maxCellWidth - 2 * style.cellHPadding)
+//            : .greatestFiniteMagnitude
+//        let wrapWidth: CGFloat = style.allowsHorizontalScroll
+//            ? maxCellInner
+//            : min(maxCellInner, codeInnerAvailable)
+//
+//        // 4) 逐行度量。
+//        var maxNaturalWidth: CGFloat = 0
+//        var rowsHeight: CGFloat = 0
+//        var lines: [CodeLineLayout] = []
+//        lines.reserveCapacity(ranges.count)
+//
+//        for (idx, range) in ranges.enumerated() {
+//            let sub = full.attributedSubstring(from: range)
+//            // 空行用一个空格 + 代码字体测出单行高度。
+//            let measureText: NSAttributedString = sub.length > 0
+//                ? sub
+//                : NSAttributedString(string: " ", attributes: [.font: style.codeFont])
+//            let bounds = measureText.boundingRect(
+//                with: CGSize(width: wrapWidth, height: .greatestFiniteMagnitude),
+//                options: [.usesLineFragmentOrigin, .usesFontLeading],
+//                context: nil)
+//            let h = max(ceil(bounds.height) + 2 * style.cellVPadding, style.minRowHeight)
+//            let w = ceil(bounds.width)
+//            lines.append(CodeLineLayout(number: idx + 1, text: sub, height: h, naturalWidth: w))
+//            maxNaturalWidth = max(maxNaturalWidth, w)
+//            rowsHeight += h
+//        }
+//
+//        metrics.lines = lines
+//        metrics.gutterWidth = gutterWidth
+//        metrics.codeContentWidth = maxNaturalWidth + 2 * style.cellHPadding
+//        metrics.rowsHeight = rowsHeight
+//        return metrics
+//    }
+    
+    private static func measure(
+        attributedText: NSAttributedString?,
+        style: CodeBlockStyle,
+        availableWidth: CGFloat
+    ) -> CodeBlockMetrics {
 
-        // 1) 按 `\n` 拆行（与换行符一一对应；末尾若有 \n 会多出一空行）。
+        var metrics = CodeBlockMetrics()
+
+        guard let full = attributedText,
+              full.length >= 0 else {
+            return metrics
+        }
+
+
+        // MARK: - 1. 按 Unicode 换行符拆行
+        //
+        // 支持：
+        // \n      U+000A LF
+        // \r      U+000D CR
+        // \r\n    CRLF
+        // \u{2028} Line Separator
+        // \u{2029} Paragraph Separator
+        //
+
         let ns = full.string as NSString
+
         var ranges: [NSRange] = []
+
         var lineStart = 0
-        let newline: unichar = 10 // \n
+
+
         for i in 0..<ns.length {
-            if ns.character(at: i) == newline {
-                ranges.append(NSRange(location: lineStart, length: i - lineStart))
-                lineStart = i + 1
+
+            let value = ns.character(at: i)
+
+            let isNewLine =
+                value == 0x0A ||   // \n
+                value == 0x0D ||   // \r
+                value == 0x2028 || // Unicode line separator
+                value == 0x2029    // Unicode paragraph separator
+
+
+            if isNewLine {
+
+                ranges.append(
+                    NSRange(
+                        location: lineStart,
+                        length: i - lineStart
+                    )
+                )
+
+
+                // 处理 Windows CRLF
+                if value == 0x0D,
+                   i + 1 < ns.length,
+                   ns.character(at: i + 1) == 0x0A {
+
+                    lineStart = i + 2
+
+                } else {
+
+                    lineStart = i + 1
+                }
             }
         }
-        ranges.append(NSRange(location: lineStart, length: ns.length - lineStart))
 
-        // 2) 行号栏宽度（按最大行号字符串宽度）。行号数量 = 换行符数 + 1，不受换行影响。
+
+        // 最后一行
+        ranges.append(
+            NSRange(
+                location: lineStart,
+                length: ns.length - lineStart
+            )
+        )
+
+
+        // MARK: - 2. 行号宽度
+
         let lineCount = ranges.count
+
         var gutterWidth: CGFloat = 0
+
+
         if style.showsLineNumbers {
-            let maxNumberString = "\(max(1, lineCount))" as NSString
-            let numberSize = maxNumberString.size(withAttributes: [.font: style.lineNumberFont])
-            gutterWidth = ceil(numberSize.width) + 2 * style.gutterHPadding
+
+            let maxNumberString =
+                "\(max(1, lineCount))" as NSString
+
+
+            let numberSize =
+                maxNumberString.size(
+                    withAttributes: [
+                        .font: style.lineNumberFont
+                    ]
+                )
+
+
+            gutterWidth =
+                ceil(numberSize.width)
+                + 2 * style.gutterHPadding
         }
 
-        // 3) 决定「换行宽度」：
-        //    - 允许水平滚动：按 maxCellWidth 换行（未设则不换行，长行改为水平滚动）；
-        //    - 不允许水平滚动：必须在代码区可用宽度内把整行换行展示完整
-        //      （行高随内容增大，但行号仍只按 `\n` 计数，不增加）。
-        let codeInnerAvailable: CGFloat = availableWidth.isFinite
-            ? max(1, availableWidth - gutterWidth - 2 * style.cellHPadding)
+
+        // MARK: - 3. 计算代码区域宽度
+
+        let codeInnerAvailable: CGFloat =
+            availableWidth.isFinite
+            ? max(
+                1,
+                availableWidth
+                - gutterWidth
+                - 2 * style.cellHPadding
+            )
             : .greatestFiniteMagnitude
-        let maxCellInner: CGFloat = style.maxCellWidth > 0
-            ? max(1, style.maxCellWidth - 2 * style.cellHPadding)
+
+
+
+        let maxCellInner: CGFloat =
+            style.maxCellWidth > 0
+            ? max(
+                1,
+                style.maxCellWidth
+                - 2 * style.cellHPadding
+            )
             : .greatestFiniteMagnitude
-        let wrapWidth: CGFloat = style.allowsHorizontalScroll
+
+
+
+        let wrapWidth: CGFloat =
+            style.allowsHorizontalScroll
             ? maxCellInner
-            : min(maxCellInner, codeInnerAvailable)
+            : min(
+                maxCellInner,
+                codeInnerAvailable
+            )
 
-        // 4) 逐行度量。
+
+        // MARK: - 4. 每一行测量
+
         var maxNaturalWidth: CGFloat = 0
-        var rowsHeight: CGFloat = 0
-        var lines: [CodeLineLayout] = []
-        lines.reserveCapacity(ranges.count)
 
-        for (idx, range) in ranges.enumerated() {
-            let sub = full.attributedSubstring(from: range)
-            // 空行用一个空格 + 代码字体测出单行高度。
-            let measureText: NSAttributedString = sub.length > 0
-                ? sub
-                : NSAttributedString(string: " ", attributes: [.font: style.codeFont])
-            let bounds = measureText.boundingRect(
-                with: CGSize(width: wrapWidth, height: .greatestFiniteMagnitude),
-                options: [.usesLineFragmentOrigin, .usesFontLeading],
-                context: nil)
-            let h = max(ceil(bounds.height) + 2 * style.cellVPadding, style.minRowHeight)
-            let w = ceil(bounds.width)
-            lines.append(CodeLineLayout(number: idx + 1, text: sub, height: h, naturalWidth: w))
-            maxNaturalWidth = max(maxNaturalWidth, w)
-            rowsHeight += h
+        var rowsHeight: CGFloat = 0
+
+
+        var lines: [CodeLineLayout] = []
+
+        lines.reserveCapacity(
+            ranges.count
+        )
+
+
+
+        for (index, range) in ranges.enumerated() {
+
+
+            let sub =
+                full.attributedSubstring(
+                    from: range
+                )
+
+
+            // 空行
+            let measureText: NSAttributedString
+
+            if sub.length > 0 {
+
+                measureText = sub
+
+            } else {
+
+                measureText =
+                    NSAttributedString(
+                        string: " ",
+                        attributes: [
+                            .font: style.codeFont
+                        ]
+                    )
+            }
+
+
+
+            let bounds =
+                measureText.boundingRect(
+                    with: CGSize(
+                        width: wrapWidth,
+                        height: .greatestFiniteMagnitude
+                    ),
+                    options: [
+                        .usesLineFragmentOrigin,
+                        .usesFontLeading
+                    ],
+                    context: nil
+                )
+
+
+
+            let height =
+                max(
+                    ceil(bounds.height)
+                    + 2 * style.cellVPadding,
+                    style.minRowHeight
+                )
+
+
+            let width =
+                ceil(bounds.width)
+
+
+
+            lines.append(
+                CodeLineLayout(
+                    number: index + 1,
+                    text: sub,
+                    height: height,
+                    naturalWidth: width
+                )
+            )
+
+
+            maxNaturalWidth =
+                max(
+                    maxNaturalWidth,
+                    width
+                )
+
+
+            rowsHeight += height
         }
+
+
+
+        // MARK: - 5. 返回
 
         metrics.lines = lines
+
         metrics.gutterWidth = gutterWidth
-        metrics.codeContentWidth = maxNaturalWidth + 2 * style.cellHPadding
+
+        metrics.codeContentWidth =
+            maxNaturalWidth
+            + 2 * style.cellHPadding
+
         metrics.rowsHeight = rowsHeight
+
+
         return metrics
     }
 }
